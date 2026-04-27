@@ -1,0 +1,22 @@
+{
+  "name": "운동 트래커",
+  "short_name": "운동",
+  "description": "근비대 목표 4분할 운동 기록 앱",
+  "start_url": "/workout-tracker/",
+  "scope": "/workout-tracker/",
+  "display": "standalone",
+  "background_color": "#0a0a0f",
+  "theme_color": "#0a0a0f",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

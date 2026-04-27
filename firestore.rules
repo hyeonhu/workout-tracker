@@ -1,0 +1,37 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function ownsUser(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function hasRecoveredAccess(userId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/userAccess/$(userId)/uids/$(request.auth.uid));
+    }
+
+    match /users/{userId}/{document=**} {
+      allow read, write: if ownsUser(userId) || hasRecoveredAccess(userId);
+    }
+
+    match /recoveryCodes/{code} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && request.resource.data.uid is string
+        && request.resource.data.uid == request.auth.uid;
+    }
+
+    match /userAccess/{userId}/uids/{uid} {
+      allow read: if ownsUser(userId) || request.auth.uid == uid;
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.code is string
+        && request.resource.data.uid == uid
+        && get(/databases/$(database)/documents/recoveryCodes/$(request.resource.data.code)).data.uid == userId;
+    }
+  }
+}
