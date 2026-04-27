@@ -22,7 +22,14 @@ import {
   setDoc,
 } from "firebase/firestore";
 import { auth, db, ensureAnonymousUser } from "./firebase";
-import { ALL_EXERCISES, CATEGORY_META, ROUTINES, createInitialState } from "./routines";
+import {
+  ALL_EXERCISES,
+  CATEGORY_META,
+  ROUTINES,
+  createInitialState,
+  defaultIncrementFor,
+  weightBasisLabel,
+} from "./routines";
 import { applyDeload, completeSession, sum } from "./progression";
 
 const tabs = [
@@ -127,7 +134,26 @@ export default function App() {
         [id]: {
           ...(exerciseData[id] || {}),
           weight: Number(value || 0),
+          incrementStep: Number(exerciseData[id]?.incrementStep || defaultIncrementFor(exercise)),
           initialized: Number(value) > 0 || exercise?.isTime,
+          currentSets: Number(exerciseData[id]?.currentSets || exercise?.defaultSets || 1),
+        },
+      },
+      updatedAt: Date.now(),
+    };
+    setState(nextState);
+    await saveState(nextState);
+  }
+
+  async function updateIncrement(id, value) {
+    const exercise = ALL_EXERCISES.find((item) => item.id === id);
+    const nextState = {
+      ...state,
+      exerciseData: {
+        ...exerciseData,
+        [id]: {
+          ...(exerciseData[id] || {}),
+          incrementStep: Math.max(0, Number(value || 0)),
           currentSets: Number(exerciseData[id]?.currentSets || exercise?.defaultSets || 1),
         },
       },
@@ -258,6 +284,7 @@ export default function App() {
             setRecoveryInput={setRecoveryInput}
             onRecover={recover}
             onWeight={updateWeight}
+            onIncrement={updateIncrement}
             onDeload={manualDeload}
             onReset={resetAll}
             busy={busy}
@@ -429,7 +456,9 @@ function HistoryView({ history }) {
                   <span className="font-semibold text-white">{exercise.name}</span>
                   <span className="text-app-muted">{exercise.totalReps}</span>
                 </div>
-                <p className="mt-1 text-app-muted">{exercise.weight}kg · {exercise.reps?.join(", ")}</p>
+                <p className="mt-1 text-app-muted">
+                  {formatHistoryWeight(exercise)} · {exercise.reps?.join(", ")}
+                </p>
               </div>
             ))}
           </div>
@@ -439,7 +468,18 @@ function HistoryView({ history }) {
   );
 }
 
-function SettingsView({ exerciseData, recoveryCode, recoveryInput, setRecoveryInput, onRecover, onWeight, onDeload, onReset, busy }) {
+function SettingsView({
+  exerciseData,
+  recoveryCode,
+  recoveryInput,
+  setRecoveryInput,
+  onRecover,
+  onWeight,
+  onIncrement,
+  onDeload,
+  onReset,
+  busy,
+}) {
   const [copied, setCopied] = useState(false);
 
   async function copyCode() {
@@ -478,26 +518,48 @@ function SettingsView({ exerciseData, recoveryCode, recoveryInput, setRecoveryIn
       </div>
 
       <div className="rounded-lg border border-app-line bg-app-card p-4">
-        <h2 className="font-bold text-white">현재 중량</h2>
+        <h2 className="font-bold text-white">중량과 증량폭</h2>
         <div className="mt-3 space-y-3">
           {ALL_EXERCISES.map((exercise) => {
             const data = exerciseData[exercise.id] || {};
             return (
-              <label key={exercise.id} className="grid grid-cols-[1fr_96px] items-center gap-3 rounded-md bg-app-bg p-3">
-                <span>
-                  <span className="block text-sm font-semibold text-white">{exercise.name}</span>
-                  <span className="text-xs text-app-muted">{exercise.min}~{exercise.max}{exercise.isTime ? "초" : "회"} · 기본 {exercise.defaultSets}세트</span>
-                </span>
-                <input
-                  type="number"
-                  step="0.5"
-                  value={data.weight || ""}
-                  placeholder="kg"
-                  onChange={(event) => onWeight(exercise.id, event.target.value)}
-                  disabled={exercise.isTime}
-                  className="h-11 rounded-md border border-app-line bg-[#0f0f16] px-2 text-right text-white outline-none focus:border-app-accent disabled:opacity-40"
-                />
-              </label>
+              <div key={exercise.id} className="rounded-md bg-app-bg p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <span>
+                    <span className="block text-sm font-semibold text-white">{exercise.name}</span>
+                    <span className="text-xs text-app-muted">
+                      {weightBasisLabel(exercise)} · {exercise.min}~{exercise.max}
+                      {exercise.isTime ? "초" : "회"}
+                    </span>
+                  </span>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <label>
+                    <span className="mb-1 block text-xs text-app-muted">현재</span>
+                    <input
+                      type="number"
+                      step="0.5"
+                      value={data.weight || ""}
+                      placeholder="kg"
+                      onChange={(event) => onWeight(exercise.id, event.target.value)}
+                      disabled={exercise.isTime}
+                      className="h-11 w-full rounded-md border border-app-line bg-[#0f0f16] px-2 text-right text-white outline-none focus:border-app-accent disabled:opacity-40"
+                    />
+                  </label>
+                  <label>
+                    <span className="mb-1 block text-xs text-app-muted">증량폭</span>
+                    <input
+                      type="number"
+                      step="0.5"
+                      value={data.incrementStep ?? defaultIncrementFor(exercise)}
+                      placeholder="kg"
+                      onChange={(event) => onIncrement(exercise.id, event.target.value)}
+                      disabled={exercise.isTime}
+                      className="h-11 w-full rounded-md border border-app-line bg-[#0f0f16] px-2 text-right text-white outline-none focus:border-app-accent disabled:opacity-40"
+                    />
+                  </label>
+                </div>
+              </div>
             );
           })}
         </div>
@@ -506,8 +568,8 @@ function SettingsView({ exerciseData, recoveryCode, recoveryInput, setRecoveryIn
       <div className="rounded-lg border border-app-line bg-app-card p-4">
         <h2 className="font-bold text-white">과부하 규칙</h2>
         <p className="mt-2 text-sm leading-6 text-app-muted">
-          지난 총합보다 1회 이상 늘면 성공. 모든 세트가 상한에 닿으면 다음 세션에 증량합니다.
-          무릎 주의 종목은 다음 세션의 무릎 체크가 통과해야 증량됩니다.
+          지난 총합보다 1회 이상 늘면 성공. 모든 세트가 상한에 닿으면 설정한 증량폭만큼 자동 증량합니다.
+          바벨은 한쪽 원판 기준, 덤벨은 개당 기준으로 적으면 됩니다. 무릎 주의 종목은 다음 세션의 무릎 체크가 통과해야 증량됩니다.
         </p>
         <div className="mt-4 grid grid-cols-2 gap-2">
           <button onClick={onDeload} className="flex items-center justify-center gap-2 rounded-md border border-app-line py-3 font-bold text-white">
@@ -590,7 +652,15 @@ function Shell({ children }) {
 
 function formatWeight(weight, exercise) {
   if (exercise.isTime || exercise.equipment === "bodyweight") return "체중";
+  if (exercise.equipment === "barbell") return `${Number(weight || 0)}kg / 한쪽`;
+  if (exercise.equipment === "dumbbell") return `${Number(weight || 0)}kg / 개당`;
   return `${Number(weight || 0)}kg`;
+}
+
+function formatHistoryWeight(historyExercise) {
+  const exercise = ALL_EXERCISES.find((item) => item.id === historyExercise.id);
+  if (!exercise) return `${Number(historyExercise.weight || 0)}kg`;
+  return formatWeight(historyExercise.weight, exercise);
 }
 
 function formatDate(value) {

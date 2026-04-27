@@ -75,6 +75,7 @@ export function createInitialExerciseData() {
       exercise.id,
       {
         weight: 0,
+        incrementStep: defaultIncrementFor(exercise),
         lastReps: [],
         targetTotal: exercise.defaultSets * exercise.min,
         stagnationCount: 0,
@@ -97,4 +98,17 @@ export function createInitialState() {
 
 function item(id, name, defaultSets, min, max, category, equipment, isTime = false) {
   return { id, name, defaultSets, min, max, category, equipment, isTime };
+}
+
+export function defaultIncrementFor(exercise) {
+  if (exercise.equipment === "dumbbell") return 1;
+  if (exercise.equipment === "bodyweight") return 0;
+  return 2.5;
+}
+
+export function weightBasisLabel(exercise) {
+  if (exercise.equipment === "barbell") return "한쪽 원판 기준";
+  if (exercise.equipment === "dumbbell") return "덤벨 개당 기준";
+  if (exercise.equipment === "bodyweight") return "시간/체중";
+  return "머신 표시 기준";
 }

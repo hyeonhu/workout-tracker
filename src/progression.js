@@ -1,15 +1,15 @@
-import { ALL_EXERCISES, createInitialExerciseData } from "./routines.js";
+import { ALL_EXERCISES, createInitialExerciseData, defaultIncrementFor } from "./routines.js";
 
 const byId = Object.fromEntries(ALL_EXERCISES.map((exercise) => [exercise.id, exercise]));
 
-export function incrementFor(exercise) {
-  if (exercise.equipment === "dumbbell") return 1;
-  if (exercise.equipment === "bodyweight") return 0;
-  return 2.5;
+export function incrementFor(exercise, data = {}) {
+  const customStep = Number(data.incrementStep);
+  if (customStep > 0) return customStep;
+  return defaultIncrementFor(exercise);
 }
 
-export function decreaseFor(exercise) {
-  const inc = incrementFor(exercise);
+export function decreaseFor(exercise, data = {}) {
+  const inc = incrementFor(exercise, data);
   return inc || 0;
 }
 
@@ -22,6 +22,7 @@ export function completeSession(state, routine, entries, kneeApprovals) {
       id: exercise.id,
       name: exercise.name,
       weight: Number(nextData[exercise.id]?.weight || 0),
+      incrementStep: Number(nextData[exercise.id]?.incrementStep || defaultIncrementFor(exercise)),
       reps,
       totalReps: sum(reps),
     };
@@ -31,6 +32,7 @@ export function completeSession(state, routine, entries, kneeApprovals) {
     const prev = nextData[exercise.id] || {};
     let data = {
       weight: Number(prev.weight || 0),
+      incrementStep: Number(prev.incrementStep || defaultIncrementFor(exercise)),
       lastReps: Array.isArray(prev.lastReps) ? prev.lastReps : [],
       targetTotal: Number(prev.targetTotal || exercise.defaultSets * exercise.min),
       stagnationCount: Number(prev.stagnationCount || 0),
@@ -46,7 +48,7 @@ export function completeSession(state, routine, entries, kneeApprovals) {
 
     if (data.kneeCheckPending) {
       if (kneeApprovals[exercise.id] === true) {
-        data.weight = roundWeight(data.weight + incrementFor(exercise));
+        data.weight = roundWeight(data.weight + incrementFor(exercise, data));
         data.lastReps = Array(data.currentSets).fill(exercise.min);
         data.targetTotal = exercise.min * data.currentSets + 1;
         data.stagnationCount = 0;
@@ -60,8 +62,8 @@ export function completeSession(state, routine, entries, kneeApprovals) {
         data.lastReps = reps;
         data.targetTotal = total + 1;
         data.stagnationCount = 0;
-      } else if (incrementFor(exercise) > 0) {
-        data.weight = roundWeight(data.weight + incrementFor(exercise));
+      } else if (incrementFor(exercise, data) > 0) {
+        data.weight = roundWeight(data.weight + incrementFor(exercise, data));
         data.currentSets = exercise.defaultSets;
         data.lastReps = Array(exercise.defaultSets).fill(exercise.min);
         data.targetTotal = exercise.min * exercise.defaultSets + 1;
@@ -81,12 +83,12 @@ export function completeSession(state, routine, entries, kneeApprovals) {
           if (!wasExtraSet) {
             data.currentSets = exercise.defaultSets + 1;
           } else {
-            data.weight = Math.max(0, roundWeight(data.weight - decreaseFor(exercise)));
+            data.weight = Math.max(0, roundWeight(data.weight - decreaseFor(exercise, data)));
             data.currentSets = exercise.defaultSets;
           }
           data.stagnationCount = 0;
         } else if (exercise.category === "knee_sensitive") {
-          data.weight = Math.max(0, roundWeight(data.weight - decreaseFor(exercise)));
+          data.weight = Math.max(0, roundWeight(data.weight - decreaseFor(exercise, data)));
           data.currentSets = exercise.defaultSets;
           data.stagnationCount = 0;
         } else {
