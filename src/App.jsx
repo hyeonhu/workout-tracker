@@ -26,8 +26,11 @@ import {
   ALL_EXERCISES,
   CATEGORY_META,
   ROUTINES,
+  TRACKED_EXERCISES,
   createInitialState,
+  dataWithSharedLoad,
   defaultIncrementFor,
+  groupMembers,
   weightBasisLabel,
 } from "./routines";
 import { applyDeload, completeSession, sum } from "./progression";
@@ -108,7 +111,7 @@ export default function App() {
     if (!state) return;
     const nextEntries = {};
     for (const exercise of routine.exercises) {
-      const data = exerciseData[exercise.id];
+      const data = dataWithSharedLoad(exercise, exerciseData);
       const sets = Number(data?.currentSets || exercise.defaultSets);
       const source = data?.lastReps?.length ? data.lastReps : Array(sets).fill(exercise.min);
       nextEntries[exercise.id] = Array.from({ length: sets }, (_, index) => Number(source[index] || exercise.min));
@@ -117,8 +120,8 @@ export default function App() {
     setKneeApprovals({});
   }, [state?.currentRoutineIndex, state?.sessionCount]);
 
-  const pendingKnee = routine.exercises.filter((exercise) => exerciseData[exercise.id]?.kneeCheckPending);
-  const initializedCount = ALL_EXERCISES.filter((exercise) => exerciseData[exercise.id]?.initialized).length;
+  const pendingKnee = routine.exercises.filter((exercise) => dataWithSharedLoad(exercise, exerciseData)?.kneeCheckPending);
+  const initializedCount = TRACKED_EXERCISES.filter((exercise) => dataWithSharedLoad(exercise, exerciseData)?.initialized).length;
 
   async function saveState(nextState) {
     if (!ownerUid) return;
@@ -127,18 +130,20 @@ export default function App() {
 
   async function updateWeight(id, value) {
     const exercise = ALL_EXERCISES.find((item) => item.id === id);
+    const members = groupMembers(exercise.groupId);
+    const nextExerciseData = { ...exerciseData };
+    for (const member of members) {
+      nextExerciseData[member.id] = {
+        ...(nextExerciseData[member.id] || {}),
+        weight: Number(value || 0),
+        incrementStep: Number(dataWithSharedLoad(member, exerciseData).incrementStep || defaultIncrementFor(member)),
+        initialized: Number(value) > 0 || member.isTime,
+        currentSets: Number(nextExerciseData[member.id]?.currentSets || member.defaultSets || 1),
+      };
+    }
     const nextState = {
       ...state,
-      exerciseData: {
-        ...exerciseData,
-        [id]: {
-          ...(exerciseData[id] || {}),
-          weight: Number(value || 0),
-          incrementStep: Number(exerciseData[id]?.incrementStep || defaultIncrementFor(exercise)),
-          initialized: Number(value) > 0 || exercise?.isTime,
-          currentSets: Number(exerciseData[id]?.currentSets || exercise?.defaultSets || 1),
-        },
-      },
+      exerciseData: nextExerciseData,
       updatedAt: Date.now(),
     };
     setState(nextState);
@@ -147,16 +152,18 @@ export default function App() {
 
   async function updateIncrement(id, value) {
     const exercise = ALL_EXERCISES.find((item) => item.id === id);
+    const members = groupMembers(exercise.groupId);
+    const nextExerciseData = { ...exerciseData };
+    for (const member of members) {
+      nextExerciseData[member.id] = {
+        ...(nextExerciseData[member.id] || {}),
+        incrementStep: Math.max(0, Number(value || 0)),
+        currentSets: Number(nextExerciseData[member.id]?.currentSets || member.defaultSets || 1),
+      };
+    }
     const nextState = {
       ...state,
-      exerciseData: {
-        ...exerciseData,
-        [id]: {
-          ...(exerciseData[id] || {}),
-          incrementStep: Math.max(0, Number(value || 0)),
-          currentSets: Number(exerciseData[id]?.currentSets || exercise?.defaultSets || 1),
-        },
-      },
+      exerciseData: nextExerciseData,
       updatedAt: Date.now(),
     };
     setState(nextState);
@@ -327,7 +334,7 @@ function TodayView({ routine, exerciseData, initializedCount, onLog, onSettings 
             <p className="mt-1 text-sm text-app-muted">{routine.title}</p>
           </div>
           <div className="rounded-md bg-app-accent px-3 py-2 text-sm font-bold text-white">
-            {initializedCount}/{ALL_EXERCISES.length}
+            {initializedCount}/{TRACKED_EXERCISES.length}
           </div>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-2">
@@ -341,7 +348,7 @@ function TodayView({ routine, exerciseData, initializedCount, onLog, onSettings 
       </div>
 
       {routine.exercises.map((exercise) => {
-        const data = exerciseData[exercise.id] || {};
+        const data = dataWithSharedLoad(exercise, exerciseData);
         const target = Number(data.targetTotal || exercise.defaultSets * exercise.min);
         return (
           <ExerciseCard key={exercise.id} exercise={exercise} data={data}>
@@ -393,7 +400,7 @@ function LogView({ routine, exerciseData, entries, setEntries, pendingKnee, knee
       )}
 
       {routine.exercises.map((exercise) => {
-        const data = exerciseData[exercise.id] || {};
+        const data = dataWithSharedLoad(exercise, exerciseData);
         const reps = entries[exercise.id] || [];
         return (
           <ExerciseCard key={exercise.id} exercise={exercise} data={data}>
@@ -440,6 +447,7 @@ function HistoryView({ history }) {
 
   return (
     <section className="space-y-3">
+      <VolumeChart history={history} />
       {history.map((session) => (
         <article key={session.id} className="rounded-lg border border-app-line bg-app-card p-4">
           <div className="flex items-start justify-between gap-3">
@@ -465,6 +473,80 @@ function HistoryView({ history }) {
         </article>
       ))}
     </section>
+  );
+}
+
+function VolumeChart({ history }) {
+  const points = useMemo(() => {
+    return history
+      .slice(0, 12)
+      .reverse()
+      .map((session) => {
+        const exercises = session.exercises || [];
+        const totalReps = exercises.reduce((acc, exercise) => acc + Number(exercise.totalReps || 0), 0);
+        const volume = exercises.reduce((acc, exercise) => {
+          const weight = Number(exercise.weight || 0);
+          return acc + weight * Number(exercise.totalReps || 0);
+        }, 0);
+        return {
+          id: session.id,
+          label: session.routine,
+          date: formatShortDate(session.date),
+          totalReps,
+          volume,
+        };
+      });
+  }, [history]);
+  const latest = points[points.length - 1];
+  const previous = points[points.length - 2];
+  const maxVolume = Math.max(...points.map((point) => point.volume), 1);
+  const maxReps = Math.max(...points.map((point) => point.totalReps), 1);
+  const volumeDiff = latest && previous ? latest.volume - previous.volume : 0;
+  const repsDiff = latest && previous ? latest.totalReps - previous.totalReps : 0;
+
+  return (
+    <div className="rounded-lg border border-app-line bg-app-card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-bold text-white">진행 차트</h2>
+          <p className="mt-1 text-sm text-app-muted">최근 12세션 기준</p>
+        </div>
+        <div className="text-right text-xs text-app-muted">
+          <p>볼륨 {formatSigned(volumeDiff)}</p>
+          <p>반복 {formatSigned(repsDiff)}</p>
+        </div>
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <Info label="최근 볼륨" value={formatNumber(latest?.volume || 0)} />
+        <Info label="최근 총합" value={`${latest?.totalReps || 0}회`} />
+      </div>
+      <div className="mt-4 h-40 rounded-md bg-app-bg p-3">
+        <div className="flex h-full items-end gap-2">
+          {points.map((point) => (
+            <div key={point.id} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1">
+              <div className="relative flex h-28 w-full items-end justify-center rounded-sm bg-[#1b1b27]">
+                <div
+                  className="absolute bottom-0 w-full rounded-sm bg-app-accent"
+                  style={{ height: `${Math.max(4, (point.volume / maxVolume) * 100)}%` }}
+                  title={`볼륨 ${formatNumber(point.volume)}`}
+                />
+                <div
+                  className="absolute bottom-0 w-1/2 rounded-sm bg-emerald-400/80"
+                  style={{ height: `${Math.max(4, (point.totalReps / maxReps) * 100)}%` }}
+                  title={`반복 ${point.totalReps}`}
+                />
+              </div>
+              <span className="text-[10px] font-bold text-white">{point.label}</span>
+              <span className="text-[10px] text-app-muted">{point.date}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="mt-3 flex gap-3 text-xs text-app-muted">
+        <span><span className="mr-1 inline-block h-2 w-2 rounded-sm bg-app-accent" />추적 볼륨</span>
+        <span><span className="mr-1 inline-block h-2 w-2 rounded-sm bg-emerald-400" />총 반복수</span>
+      </div>
+    </div>
   );
 }
 
@@ -520,8 +602,8 @@ function SettingsView({
       <div className="rounded-lg border border-app-line bg-app-card p-4">
         <h2 className="font-bold text-white">중량과 증량폭</h2>
         <div className="mt-3 space-y-3">
-          {ALL_EXERCISES.map((exercise) => {
-            const data = exerciseData[exercise.id] || {};
+          {TRACKED_EXERCISES.map((exercise) => {
+            const data = dataWithSharedLoad(exercise, exerciseData);
             return (
               <div key={exercise.id} className="rounded-md bg-app-bg p-3">
                 <div className="flex items-start justify-between gap-3">
@@ -672,6 +754,24 @@ function formatDate(value) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+function formatShortDate(value) {
+  const date = value?.toDate ? value.toDate() : value ? new Date(value) : new Date();
+  return new Intl.DateTimeFormat("ko-KR", {
+    month: "numeric",
+    day: "numeric",
+  }).format(date);
+}
+
+function formatSigned(value) {
+  const number = Math.round(Number(value || 0));
+  if (number > 0) return `+${formatNumber(number)}`;
+  return formatNumber(number);
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat("ko-KR").format(Math.round(Number(value || 0)));
 }
 
 function dateMs(value) {

@@ -44,9 +44,9 @@ export const ROUTINES = [
       item("incline_bench_press", "인클라인 벤치프레스", 3, 8, 12, "upper_main", "barbell"),
       item("neutral_lat_pulldown", "뉴트럴그립 랫풀다운", 2, 8, 12, "upper_main", "machine"),
       item("cable_fly", "케이블 플라이", 2, 10, 15, "isolation", "machine"),
-      item("leg_press_a2", "레그프레스", 2, 12, 15, "knee_sensitive", "machine"),
+      item("leg_press_a2", "레그프레스", 2, 12, 15, "knee_sensitive", "machine", false, "leg_press"),
       item("leg_extension", "레그 익스텐션", 2, 10, 15, "knee_sensitive", "machine"),
-      item("lateral_raise_a2", "사이드 레터럴 레이즈", 2, 15, 25, "isolation", "dumbbell"),
+      item("lateral_raise_a2", "사이드 레터럴 레이즈", 2, 15, 25, "isolation", "dumbbell", false, "lateral_raise"),
       item("reverse_crunch", "리버스 크런치", 3, 10, 15, "isolation", "machine"),
     ],
   },
@@ -58,8 +58,8 @@ export const ROUTINES = [
     exercises: [
       item("hip_thrust", "힙쓰러스트", 3, 8, 12, "posterior", "machine"),
       item("chest_supported_row", "체스트 서포티드 로우", 3, 8, 12, "upper_main", "machine"),
-      item("lat_pulldown_b2", "랫풀다운", 2, 10, 12, "upper_main", "machine"),
-      item("leg_curl_b2", "레그컬", 2, 10, 15, "isolation", "machine"),
+      item("lat_pulldown_b2", "랫풀다운", 2, 10, 12, "upper_main", "machine", false, "lat_pulldown"),
+      item("leg_curl_b2", "레그컬", 2, 10, 15, "isolation", "machine", false, "leg_curl"),
       item("hammer_curl", "해머 컬", 2, 10, 15, "isolation", "dumbbell"),
       item("overhead_triceps_extension", "오버헤드 트라이셉스 익스텐션", 2, 10, 15, "isolation", "machine"),
       item("plank", "플랭크", 2, 30, 45, "isolation", "bodyweight", true),
@@ -68,6 +68,9 @@ export const ROUTINES = [
 ];
 
 export const ALL_EXERCISES = ROUTINES.flatMap((routine) => routine.exercises);
+export const TRACKED_EXERCISES = Array.from(
+  new Map(ALL_EXERCISES.map((exercise) => [exercise.groupId, exercise])).values()
+);
 
 export function createInitialExerciseData() {
   return Object.fromEntries(
@@ -96,8 +99,23 @@ export function createInitialState() {
   };
 }
 
-function item(id, name, defaultSets, min, max, category, equipment, isTime = false) {
-  return { id, name, defaultSets, min, max, category, equipment, isTime };
+function item(id, name, defaultSets, min, max, category, equipment, isTime = false, groupId = id) {
+  return { id, groupId, name, defaultSets, min, max, category, equipment, isTime };
+}
+
+export function groupMembers(groupId) {
+  return ALL_EXERCISES.filter((exercise) => exercise.groupId === groupId);
+}
+
+export function dataWithSharedLoad(exercise, exerciseData = {}) {
+  const own = exerciseData[exercise.id] || {};
+  const shared = exerciseData[exercise.groupId] || {};
+  return {
+    ...own,
+    weight: Number(shared.weight ?? own.weight ?? 0),
+    incrementStep: Number(shared.incrementStep ?? own.incrementStep ?? defaultIncrementFor(exercise)),
+    initialized: Boolean(shared.initialized || own.initialized || exercise.isTime),
+  };
 }
 
 export function defaultIncrementFor(exercise) {

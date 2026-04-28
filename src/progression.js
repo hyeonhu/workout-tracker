@@ -1,4 +1,10 @@
-import { ALL_EXERCISES, createInitialExerciseData, defaultIncrementFor } from "./routines.js";
+import {
+  ALL_EXERCISES,
+  createInitialExerciseData,
+  dataWithSharedLoad,
+  defaultIncrementFor,
+  groupMembers,
+} from "./routines.js";
 
 const byId = Object.fromEntries(ALL_EXERCISES.map((exercise) => [exercise.id, exercise]));
 
@@ -18,18 +24,20 @@ export function completeSession(state, routine, entries, kneeApprovals) {
   const nextData = { ...exerciseData };
   const historyExercises = routine.exercises.map((exercise) => {
     const reps = entries[exercise.id] || [];
+    const sharedData = dataWithSharedLoad(exercise, nextData);
     return {
       id: exercise.id,
+      groupId: exercise.groupId,
       name: exercise.name,
-      weight: Number(nextData[exercise.id]?.weight || 0),
-      incrementStep: Number(nextData[exercise.id]?.incrementStep || defaultIncrementFor(exercise)),
+      weight: Number(sharedData.weight || 0),
+      incrementStep: Number(sharedData.incrementStep || defaultIncrementFor(exercise)),
       reps,
       totalReps: sum(reps),
     };
   });
 
   for (const exercise of routine.exercises) {
-    const prev = nextData[exercise.id] || {};
+    const prev = dataWithSharedLoad(exercise, nextData);
     let data = {
       weight: Number(prev.weight || 0),
       incrementStep: Number(prev.incrementStep || defaultIncrementFor(exercise)),
@@ -98,6 +106,7 @@ export function completeSession(state, routine, entries, kneeApprovals) {
     }
 
     nextData[exercise.id] = data;
+    syncSharedLoad(nextData, exercise, data);
   }
 
   let nextState = {
@@ -144,4 +153,15 @@ export function sum(values) {
 
 function roundWeight(value) {
   return Math.round(Number(value || 0) * 10) / 10;
+}
+
+function syncSharedLoad(nextData, exercise, data) {
+  for (const member of groupMembers(exercise.groupId)) {
+    nextData[member.id] = {
+      ...(nextData[member.id] || {}),
+      weight: data.weight,
+      incrementStep: data.incrementStep,
+      initialized: data.initialized,
+    };
+  }
 }
