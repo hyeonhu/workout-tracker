@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
+  ChevronDown,
   ClipboardList,
   Copy,
   Dumbbell,
@@ -12,27 +13,21 @@ import {
   Settings,
   ShieldCheck,
 } from "lucide-react";
+import { addDoc, collection, doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
+import { db, ensureAnonymousUser } from "./firebase";
 import {
-  addDoc,
-  collection,
-  doc,
-  getDoc,
-  onSnapshot,
-  serverTimestamp,
-  setDoc,
-} from "firebase/firestore";
-import { auth, db, ensureAnonymousUser } from "./firebase";
-import {
-  ALL_EXERCISES,
   CATEGORY_META,
+  MUSCLE_GROUPS,
+  PROFILE_LIST,
   ROUTINES,
-  TRACKED_EXERCISES,
   createInitialState,
-  dataWithSharedLoad,
-  defaultIncrementFor,
-  groupMembers,
+  instanceView,
+  migrateState,
+  profileById,
+  sessionSummary,
   weightBasisLabel,
 } from "./routines";
+import { complianceSeries, dateKey, progressionSeries, sessionVolume, toDate, weeklyMuscleVolume } from "./analytics";
 import { applyDeload, completeSession, sum } from "./progression";
 
 const tabs = [
@@ -49,6 +44,7 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const [tab, setTab] = useState("today");
   const [entries, setEntries] = useState({});
+  const [sessionNotes, setSessionNotes] = useState("");
   const [kneeApprovals, setKneeApprovals] = useState({});
   const [recoveryCode, setRecoveryCode] = useState(() => localStorage.getItem("recoveryCode") || "");
   const [recoveryInput, setRecoveryInput] = useState("");
@@ -76,7 +72,9 @@ export default function App() {
         setState(fresh);
         return;
       }
-      setState(snapshot.data());
+      const migrated = migrateState(snapshot.data());
+      setState(migrated);
+      if (snapshot.data().schemaVersion !== 2) await setDoc(stateRef, migrated);
       setStatus("저장됨");
     });
     return unsubscribe;
@@ -84,15 +82,13 @@ export default function App() {
 
   useEffect(() => {
     if (!user || !ownerUid) return undefined;
-    const historyRef = collection(db, "users", ownerUid, "history");
-    const unsubscribe = onSnapshot(historyRef, (snapshot) => {
+    return onSnapshot(collection(db, "users", ownerUid, "history"), (snapshot) => {
       const rows = snapshot.docs
         .map((historyDoc) => ({ id: historyDoc.id, ...historyDoc.data() }))
-        .sort((a, b) => dateMs(b.date) - dateMs(a.date))
-        .slice(0, 30);
+        .sort((a, b) => toDate(b.date) - toDate(a.date))
+        .slice(0, 120);
       setHistory(rows);
     });
-    return unsubscribe;
   }, [user, ownerUid]);
 
   useEffect(() => {
@@ -104,66 +100,41 @@ export default function App() {
     });
   }, [user, ownerUid, recoveryCode]);
 
-  const routine = ROUTINES[Number(state?.currentRoutineIndex || 0)] || ROUTINES[0];
-  const exerciseData = state?.exerciseData || {};
+  const appState = state ? migrateState(state) : null;
+  const routine = ROUTINES[Number(appState?.currentRoutineIndex || 0)] || ROUTINES[0];
+  const pendingKnee = appState
+    ? routine.exercises.filter((exercise) => exercise.anchorSession && profileById(exercise.profileId).kneeSensitive && instanceView(exercise, appState).kneeCheckPending)
+    : [];
 
   useEffect(() => {
-    if (!state) return;
+    if (!appState) return;
     const nextEntries = {};
     for (const exercise of routine.exercises) {
-      const data = dataWithSharedLoad(exercise, exerciseData);
-      const sets = Number(data?.currentSets || exercise.defaultSets);
-      const source = data?.lastReps?.length ? data.lastReps : Array(sets).fill(exercise.min);
+      const view = instanceView(exercise, appState);
+      const sets = Number(view.currentSets || exercise.defaultSets);
+      const source = view.lastReps?.length ? view.lastReps : Array(sets).fill(exercise.min);
       nextEntries[exercise.id] = Array.from({ length: sets }, (_, index) => Number(source[index] || exercise.min));
     }
     setEntries(nextEntries);
     setKneeApprovals({});
-  }, [state?.currentRoutineIndex, state?.sessionCount]);
-
-  const pendingKnee = routine.exercises.filter((exercise) => dataWithSharedLoad(exercise, exerciseData)?.kneeCheckPending);
-  const initializedCount = TRACKED_EXERCISES.filter((exercise) => dataWithSharedLoad(exercise, exerciseData)?.initialized).length;
+    setSessionNotes("");
+  }, [appState?.currentRoutineIndex, appState?.sessionCount]);
 
   async function saveState(nextState) {
     if (!ownerUid) return;
-    await setDoc(doc(db, "users", ownerUid, "state", "current"), nextState);
+    await setDoc(doc(db, "users", ownerUid, "state", "current"), migrateState(nextState));
   }
 
-  async function updateWeight(id, value) {
-    const exercise = ALL_EXERCISES.find((item) => item.id === id);
-    const members = groupMembers(exercise.groupId);
-    const nextExerciseData = { ...exerciseData };
-    for (const member of members) {
-      nextExerciseData[member.id] = {
-        ...(nextExerciseData[member.id] || {}),
-        weight: Number(value || 0),
-        incrementStep: Number(dataWithSharedLoad(member, exerciseData).incrementStep || defaultIncrementFor(member)),
-        initialized: Number(value) > 0 || member.isTime,
-        currentSets: Number(nextExerciseData[member.id]?.currentSets || member.defaultSets || 1),
-      };
-    }
+  async function updateProfile(profileId, patch) {
     const nextState = {
-      ...state,
-      exerciseData: nextExerciseData,
-      updatedAt: Date.now(),
-    };
-    setState(nextState);
-    await saveState(nextState);
-  }
-
-  async function updateIncrement(id, value) {
-    const exercise = ALL_EXERCISES.find((item) => item.id === id);
-    const members = groupMembers(exercise.groupId);
-    const nextExerciseData = { ...exerciseData };
-    for (const member of members) {
-      nextExerciseData[member.id] = {
-        ...(nextExerciseData[member.id] || {}),
-        incrementStep: Math.max(0, Number(value || 0)),
-        currentSets: Number(nextExerciseData[member.id]?.currentSets || member.defaultSets || 1),
-      };
-    }
-    const nextState = {
-      ...state,
-      exerciseData: nextExerciseData,
+      ...appState,
+      profileData: {
+        ...appState.profileData,
+        [profileId]: {
+          ...appState.profileData[profileId],
+          ...patch,
+        },
+      },
       updatedAt: Date.now(),
     };
     setState(nextState);
@@ -173,20 +144,22 @@ export default function App() {
   async function finishSession() {
     setBusy(true);
     try {
-      const missingKnee = pendingKnee.some((exercise) => kneeApprovals[exercise.id] === undefined);
-      if (missingKnee) {
+      if (pendingKnee.some((exercise) => kneeApprovals[exercise.id] === undefined)) {
         setStatus("무릎 체크를 먼저 선택해줘");
         setTab("log");
         return;
       }
-      const { nextState, historyExercises } = completeSession(state, routine, entries, kneeApprovals);
+      const result = completeSession(appState, routine, entries, kneeApprovals, sessionNotes.trim());
       await addDoc(collection(db, "users", ownerUid, "history"), {
         date: serverTimestamp(),
+        sessionId: routine.id,
         routine: routine.name,
         routineTitle: routine.title,
-        exercises: historyExercises,
+        notes: result.notes,
+        kneeConfirmations: result.kneeConfirmations,
+        exercises: result.historyExercises,
       });
-      await saveState(nextState);
+      await saveState(result.nextState);
       setTab("today");
       setStatus("세션 완료");
     } finally {
@@ -229,12 +202,12 @@ export default function App() {
   }
 
   async function manualDeload() {
-    const nextState = applyDeload(state);
+    const nextState = applyDeload(appState);
     await saveState({ ...nextState, lastDeloadAt: Date.now() });
     setStatus("디로드 적용됨");
   }
 
-  if (!state) {
+  if (!appState) {
     return (
       <Shell>
         <div className="flex min-h-screen items-center justify-center px-5 text-center text-app-muted">
@@ -260,24 +233,18 @@ export default function App() {
       </header>
 
       <main className="mx-auto min-h-[calc(100vh-160px)] w-full max-w-[480px] px-4 pb-28 pt-4">
-        {tab === "today" && (
-          <TodayView
-            routine={routine}
-            exerciseData={exerciseData}
-            initializedCount={initializedCount}
-            onLog={() => setTab("log")}
-            onSettings={() => setTab("settings")}
-          />
-        )}
+        {tab === "today" && <TodayView state={appState} currentRoutine={routine} onLog={() => setTab("log")} onSettings={() => setTab("settings")} />}
         {tab === "log" && (
           <LogView
+            state={appState}
             routine={routine}
-            exerciseData={exerciseData}
             entries={entries}
             setEntries={setEntries}
             pendingKnee={pendingKnee}
             kneeApprovals={kneeApprovals}
             setKneeApprovals={setKneeApprovals}
+            notes={sessionNotes}
+            setNotes={setSessionNotes}
             onFinish={finishSession}
             busy={busy}
           />
@@ -285,13 +252,12 @@ export default function App() {
         {tab === "history" && <HistoryView history={history} />}
         {tab === "settings" && (
           <SettingsView
-            exerciseData={exerciseData}
+            state={appState}
             recoveryCode={recoveryCode}
             recoveryInput={recoveryInput}
             setRecoveryInput={setRecoveryInput}
             onRecover={recover}
-            onWeight={updateWeight}
-            onIncrement={updateIncrement}
+            onProfile={updateProfile}
             onDeload={manualDeload}
             onReset={resetAll}
             busy={busy}
@@ -308,9 +274,7 @@ export default function App() {
               <button
                 key={item.id}
                 onClick={() => setTab(item.id)}
-                className={`flex h-14 flex-col items-center justify-center gap-1 rounded-md text-xs transition ${
-                  active ? "bg-app-accent text-white" : "text-app-muted"
-                }`}
+                className={`flex h-14 flex-col items-center justify-center gap-1 rounded-md text-xs transition ${active ? "bg-app-accent text-white" : "text-app-muted"}`}
               >
                 <Icon className="h-5 w-5" />
                 {item.label}
@@ -323,73 +287,97 @@ export default function App() {
   );
 }
 
-function TodayView({ routine, exerciseData, initializedCount, onLog, onSettings }) {
+function TodayView({ state, currentRoutine, onLog, onSettings }) {
+  const [open, setOpen] = useState(() => ({ [currentRoutine.id]: true }));
+
+  useEffect(() => {
+    setOpen((prev) => ({ ...prev, [currentRoutine.id]: true }));
+  }, [currentRoutine.id]);
+
   return (
     <section className="space-y-4">
       <div className="rounded-lg border border-app-line bg-app-card p-4 shadow-glow">
-        <div className="flex items-start justify-between gap-3">
+        <p className="text-sm text-app-muted">오늘 배정</p>
+        <div className="mt-1 flex items-start justify-between gap-3">
           <div>
-            <p className="text-sm text-app-muted">{routine.day}요일 루틴</p>
-            <h2 className="text-3xl font-black text-white">{routine.name}</h2>
-            <p className="mt-1 text-sm text-app-muted">{routine.title}</p>
+            <h2 className="text-3xl font-black text-white">{currentRoutine.name}</h2>
+            <p className="mt-1 text-sm text-app-muted">{currentRoutine.day}요일 · {currentRoutine.title}</p>
           </div>
-          <div className="rounded-md bg-app-accent px-3 py-2 text-sm font-bold text-white">
-            {initializedCount}/{TRACKED_EXERCISES.length}
-          </div>
-        </div>
-        <div className="mt-4 grid grid-cols-2 gap-2">
-          <button onClick={onLog} className="rounded-md bg-app-accent py-3 font-bold text-white">
-            기록하기
-          </button>
-          <button onClick={onSettings} className="rounded-md border border-app-line py-3 font-bold text-app-text">
-            중량 설정
+          <button onClick={onLog} className="rounded-md bg-app-accent px-4 py-3 font-bold text-white">
+            기록
           </button>
         </div>
+        <button onClick={onSettings} className="mt-3 w-full rounded-md border border-app-line py-3 font-bold text-app-text">
+          중량 설정
+        </button>
       </div>
 
-      {routine.exercises.map((exercise) => {
-        const data = dataWithSharedLoad(exercise, exerciseData);
-        const target = Number(data.targetTotal || exercise.defaultSets * exercise.min);
-        return (
-          <ExerciseCard key={exercise.id} exercise={exercise} data={data}>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-              <Info label="현재" value={data.initialized || exercise.isTime ? formatWeight(data.weight, exercise) : "설정 필요"} />
-              <Info label="목표" value={`총 ${target} ${exercise.isTime ? "초" : "회"} 이상`} />
-              <Info label="구성" value={`${data.currentSets || exercise.defaultSets}세트 x ${exercise.min}~${exercise.max}${exercise.isTime ? "초" : "회"}`} />
-              <Info label="정체" value={`${data.stagnationCount || 0}회`} warn={Number(data.stagnationCount || 0) > 0} />
-            </div>
-            {data.kneeCheckPending && (
-              <p className="mt-3 rounded-md bg-amber-500/15 px-3 py-2 text-sm text-amber-200">무릎 상태 체크 대기 중</p>
-            )}
-          </ExerciseCard>
-        );
-      })}
+      {ROUTINES.map((routine) => (
+        <SessionAccordion
+          key={routine.id}
+          routine={routine}
+          state={state}
+          open={Boolean(open[routine.id])}
+          current={routine.id === currentRoutine.id}
+          onToggle={() => setOpen((prev) => ({ ...prev, [routine.id]: !prev[routine.id] }))}
+        />
+      ))}
     </section>
   );
 }
 
-function LogView({ routine, exerciseData, entries, setEntries, pendingKnee, kneeApprovals, setKneeApprovals, onFinish, busy }) {
+function SessionAccordion({ routine, state, open, current, onToggle }) {
+  const summary = sessionSummary(routine);
+  return (
+    <article className={`overflow-hidden rounded-lg border bg-app-card transition ${current ? "border-app-accent" : "border-app-line"}`}>
+      <button onClick={onToggle} className="flex w-full items-center justify-between gap-3 p-4 text-left">
+        <div>
+          <div className="flex items-center gap-2">
+            <h3 className="text-lg font-black text-white">{routine.name}</h3>
+            <span className="rounded-md bg-app-bg px-2 py-1 text-xs text-app-muted">{routine.day}</span>
+            {current && <span className="rounded-md bg-app-accent px-2 py-1 text-xs font-bold text-white">오늘</span>}
+          </div>
+          <p className="mt-1 text-sm text-app-muted">{routine.title}</p>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs">
+            <Badge>{summary.exerciseCount}종목</Badge>
+            <Badge>{summary.totalSets}세트</Badge>
+            {summary.hasKneeSensitive && <Badge amber>무릎 민감 종목 있음</Badge>}
+          </div>
+        </div>
+        <ChevronDown className={`h-5 w-5 text-app-muted transition ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="space-y-3 border-t border-app-line p-4">
+          {routine.exercises.map((exercise) => (
+            <ExerciseCard key={exercise.id} exercise={exercise} view={instanceView(exercise, state)} />
+          ))}
+        </div>
+      )}
+    </article>
+  );
+}
+
+function LogView({ state, routine, entries, setEntries, pendingKnee, kneeApprovals, setKneeApprovals, notes, setNotes, onFinish, busy }) {
   return (
     <section className="space-y-4">
+      <div className="rounded-lg border border-app-line bg-app-card p-4">
+        <h2 className="text-2xl font-black text-white">{routine.name}</h2>
+        <p className="text-sm text-app-muted">{routine.day}요일 · {routine.title}</p>
+      </div>
+
       {pendingKnee.length > 0 && (
         <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
           <h2 className="font-bold text-amber-100">무릎 상태 체크</h2>
           <p className="mt-1 text-sm text-amber-100/80">지난 세션 이후 통증, 부종, 불안정이 없었어?</p>
           <div className="mt-3 space-y-3">
             {pendingKnee.map((exercise) => (
-              <div key={exercise.id} className="flex items-center justify-between gap-2">
-                <span className="text-sm text-white">{exercise.name}</span>
+              <div key={exercise.id} className="space-y-2">
+                <span className="text-sm font-bold text-white">{profileById(exercise.profileId).name}</span>
                 <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => setKneeApprovals((prev) => ({ ...prev, [exercise.id]: true }))}
-                    className={`rounded-md px-3 py-2 text-sm ${kneeApprovals[exercise.id] === true ? "bg-emerald-500 text-white" : "bg-app-card text-app-muted"}`}
-                  >
+                  <button onClick={() => setKneeApprovals((prev) => ({ ...prev, [exercise.id]: true }))} className={`rounded-md px-3 py-3 text-sm ${kneeApprovals[exercise.id] === true ? "bg-emerald-500 text-white" : "bg-app-card text-app-muted"}`}>
                     문제 없음
                   </button>
-                  <button
-                    onClick={() => setKneeApprovals((prev) => ({ ...prev, [exercise.id]: false }))}
-                    className={`rounded-md px-3 py-2 text-sm ${kneeApprovals[exercise.id] === false ? "bg-red-500 text-white" : "bg-app-card text-app-muted"}`}
-                  >
+                  <button onClick={() => setKneeApprovals((prev) => ({ ...prev, [exercise.id]: false }))} className={`rounded-md px-3 py-3 text-sm ${kneeApprovals[exercise.id] === false ? "bg-red-500 text-white" : "bg-app-card text-app-muted"}`}>
                     불편했음
                   </button>
                 </div>
@@ -400,13 +388,13 @@ function LogView({ routine, exerciseData, entries, setEntries, pendingKnee, knee
       )}
 
       {routine.exercises.map((exercise) => {
-        const data = dataWithSharedLoad(exercise, exerciseData);
+        const view = instanceView(exercise, state);
         const reps = entries[exercise.id] || [];
         return (
-          <ExerciseCard key={exercise.id} exercise={exercise} data={data}>
+          <ExerciseLogCard key={exercise.id} exercise={exercise} view={view}>
             <div className="mt-3 flex items-center justify-between text-sm">
-              <span className="text-app-muted">{formatWeight(data.weight, exercise)}</span>
-              <span className="font-bold text-white">총 {sum(reps)} {exercise.isTime ? "초" : "회"}</span>
+              <span className="text-app-muted">{formatWeight(view.weight, view)}</span>
+              <span className="font-bold text-white">총 {sum(reps)} {view.isTime ? "초" : "회"}</span>
             </div>
             <div className="mt-3 space-y-2">
               {reps.map((rep, index) => (
@@ -415,24 +403,28 @@ function LogView({ routine, exerciseData, entries, setEntries, pendingKnee, knee
                   value={rep}
                   min={exercise.min}
                   max={exercise.max}
-                  unit={exercise.isTime ? "초" : "회"}
+                  unit={view.isTime ? "초" : "회"}
                   onChange={(value) =>
                     setEntries((prev) => ({
                       ...prev,
-                      [exercise.id]: prev[exercise.id].map((item, itemIndex) => (itemIndex === index ? value : item)),
+                      [exercise.id]: (prev[exercise.id] || []).map((item, itemIndex) => (itemIndex === index ? value : item)),
                     }))
                   }
                 />
               ))}
             </div>
-          </ExerciseCard>
+          </ExerciseLogCard>
         );
       })}
-      <button
-        onClick={onFinish}
-        disabled={busy}
-        className="flex w-full items-center justify-center gap-2 rounded-md bg-app-accent py-4 text-lg font-black text-white disabled:opacity-50"
-      >
+
+      <textarea
+        value={notes}
+        onChange={(event) => setNotes(event.target.value)}
+        placeholder="오늘 컨디션, 통증, 특이사항"
+        className="min-h-24 w-full rounded-lg border border-app-line bg-app-card p-4 text-white outline-none focus:border-app-accent"
+      />
+
+      <button onClick={onFinish} disabled={busy} className="flex w-full items-center justify-center gap-2 rounded-md bg-app-accent py-4 text-lg font-black text-white disabled:opacity-50">
         <Save className="h-5 w-5" />
         세션 완료
       </button>
@@ -441,127 +433,183 @@ function LogView({ routine, exerciseData, entries, setEntries, pendingKnee, knee
 }
 
 function HistoryView({ history }) {
-  if (!history.length) {
-    return <Empty title="아직 기록이 없어" text="첫 세션을 완료하면 여기에 쌓입니다." />;
-  }
+  const [open, setOpen] = useState({});
+  const groups = useMemo(() => groupHistoryByDate(history), [history]);
+
+  if (!history.length) return <Empty title="아직 기록이 없어" text="첫 세션을 완료하면 여기에 쌓입니다." />;
 
   return (
-    <section className="space-y-3">
-      <VolumeChart history={history} />
-      {history.map((session) => (
-        <article key={session.id} className="rounded-lg border border-app-line bg-app-card p-4">
-          <div className="flex items-start justify-between gap-3">
+    <section className="space-y-4">
+      <AnalyticsDashboard history={history} />
+      {groups.map((group) => (
+        <article key={group.key} className="overflow-hidden rounded-lg border border-app-line bg-app-card">
+          <button onClick={() => setOpen((prev) => ({ ...prev, [group.key]: !prev[group.key] }))} className="flex w-full items-center justify-between gap-3 p-4 text-left">
             <div>
-              <h2 className="text-lg font-bold text-white">{session.routine} · {session.routineTitle}</h2>
-              <p className="text-sm text-app-muted">{formatDate(session.date)}</p>
+              <h2 className="font-bold text-white">{group.label}</h2>
+              <p className="mt-1 text-sm text-app-muted">{group.sessions.length}세션 · 총 볼륨 {formatNumber(group.volume)}</p>
             </div>
-            <span className="rounded-md bg-app-bg px-2 py-1 text-xs text-app-muted">{session.exercises?.length || 0}종목</span>
-          </div>
-          <div className="mt-3 space-y-2">
-            {(session.exercises || []).map((exercise) => (
-              <div key={exercise.id} className="rounded-md bg-app-bg px-3 py-2 text-sm">
-                <div className="flex justify-between gap-2">
-                  <span className="font-semibold text-white">{exercise.name}</span>
-                  <span className="text-app-muted">{exercise.totalReps}</span>
-                </div>
-                <p className="mt-1 text-app-muted">
-                  {formatHistoryWeight(exercise)} · {exercise.reps?.join(", ")}
-                </p>
-              </div>
-            ))}
-          </div>
+            <ChevronDown className={`h-5 w-5 text-app-muted transition ${open[group.key] ? "rotate-180" : ""}`} />
+          </button>
+          {open[group.key] && (
+            <div className="space-y-3 border-t border-app-line p-4">
+              {group.sessions.map((session) => (
+                <SessionHistoryCard key={session.id} session={session} />
+              ))}
+            </div>
+          )}
         </article>
       ))}
     </section>
   );
 }
 
-function VolumeChart({ history }) {
-  const points = useMemo(() => {
-    return history
-      .slice(0, 12)
-      .reverse()
-      .map((session) => {
-        const exercises = session.exercises || [];
-        const totalReps = exercises.reduce((acc, exercise) => acc + Number(exercise.totalReps || 0), 0);
-        const volume = exercises.reduce((acc, exercise) => {
-          const weight = Number(exercise.weight || 0);
-          return acc + weight * Number(exercise.totalReps || 0);
-        }, 0);
-        return {
-          id: session.id,
-          label: session.routine,
-          date: formatShortDate(session.date),
-          totalReps,
-          volume,
-        };
-      });
-  }, [history]);
-  const latest = points[points.length - 1];
-  const previous = points[points.length - 2];
-  const maxVolume = Math.max(...points.map((point) => point.volume), 1);
-  const maxReps = Math.max(...points.map((point) => point.totalReps), 1);
-  const volumeDiff = latest && previous ? latest.volume - previous.volume : 0;
-  const repsDiff = latest && previous ? latest.totalReps - previous.totalReps : 0;
+function AnalyticsDashboard({ history }) {
+  const weekly = useMemo(() => weeklyMuscleVolume(history, 10), [history]);
+  const progression = useMemo(() => progressionSeries(history), [history]);
+  const compliance = useMemo(() => complianceSeries(history, 10), [history]);
+  return (
+    <div className="space-y-4">
+      <WeeklyMuscleVolumeChart rows={weekly} />
+      <ProgressionCharts series={progression} />
+      <ComplianceChart rows={compliance} />
+    </div>
+  );
+}
+
+function WeeklyMuscleVolumeChart({ rows }) {
+  const latest = rows[rows.length - 1];
+  const max = Math.max(...rows.flatMap((row) => Object.values(row.muscles)), 1);
+  return (
+    <section className="rounded-lg border border-app-line bg-app-card p-4">
+      <h2 className="font-bold text-white">주간 근육군 볼륨</h2>
+      <p className="mt-1 text-sm text-app-muted">최근 10주, 균형과 급증 여부 확인용</p>
+      <div className="mt-4 space-y-2">
+        {MUSCLE_GROUPS.map((muscle) => {
+          const value = latest?.muscles[muscle.id] || 0;
+          return (
+            <div key={muscle.id} className="grid grid-cols-[80px_1fr_54px] items-center gap-2 text-xs">
+              <span className="text-app-muted">{muscle.label}</span>
+              <div className="h-3 overflow-hidden rounded-full bg-app-bg">
+                <div className="h-full rounded-full" style={{ width: `${Math.min(100, (value / max) * 100)}%`, backgroundColor: muscle.color }} />
+              </div>
+              <span className="text-right text-app-muted">{formatNumber(value)}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-4 flex h-20 items-end gap-1">
+        {rows.map((row) => {
+          const total = Object.values(row.muscles).reduce((acc, value) => acc + value, 0);
+          const maxTotal = Math.max(...rows.map((item) => Object.values(item.muscles).reduce((acc, value) => acc + value, 0)), 1);
+          return (
+            <div key={row.week} className="flex flex-1 flex-col items-center gap-1">
+              <div className="w-full rounded-sm bg-app-accent" style={{ height: `${Math.max(4, (total / maxTotal) * 64)}px` }} />
+              <span className="text-[10px] text-app-muted">{row.label}</span>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function ProgressionCharts({ series }) {
+  return (
+    <section className="rounded-lg border border-app-line bg-app-card p-4">
+      <h2 className="font-bold text-white">주요 운동 진행</h2>
+      <p className="mt-1 text-sm text-app-muted">무게 추세와 총 반복수</p>
+      <div className="mt-4 space-y-3">
+        {series.map((item) => (
+          <MiniLineChart key={item.profileId} title={item.name} points={item.points} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function MiniLineChart({ title, points }) {
+  const recent = points.slice(-8);
+  const width = 260;
+  const height = 72;
+  const max = Math.max(...recent.map((point) => point.weight), 1);
+  const min = Math.min(...recent.map((point) => point.weight), 0);
+  const span = Math.max(1, max - min);
+  const path = recent
+    .map((point, index) => {
+      const x = recent.length === 1 ? width : (index / (recent.length - 1)) * width;
+      const y = height - ((point.weight - min) / span) * (height - 12) - 6;
+      return `${index === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
+    })
+    .join(" ");
+  const latest = recent[recent.length - 1];
 
   return (
-    <div className="rounded-lg border border-app-line bg-app-card p-4">
-      <div className="flex items-start justify-between gap-3">
+    <div className="rounded-md bg-app-bg p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-sm font-bold text-white">{title}</span>
+        <span className="text-xs text-app-muted">{latest ? `${latest.weight}kg · ${latest.totalReps}` : "기록 없음"}</span>
+      </div>
+      {recent.length ? (
+        <svg viewBox={`0 0 ${width} ${height}`} className="h-20 w-full overflow-visible">
+          <path d={path} fill="none" stroke="#6366f1" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+          {recent.map((point, index) => {
+            const x = recent.length === 1 ? width / 2 : (index / (recent.length - 1)) * width;
+            const y = height - ((point.weight - min) / span) * (height - 12) - 6;
+            return <circle key={`${point.id}-${index}`} cx={x} cy={y} r="4" fill="#10b981" />;
+          })}
+        </svg>
+      ) : (
+        <p className="py-5 text-center text-sm text-app-muted">아직 기록 없음</p>
+      )}
+    </div>
+  );
+}
+
+function ComplianceChart({ rows }) {
+  return (
+    <section className="rounded-lg border border-app-line bg-app-card p-4">
+      <h2 className="font-bold text-white">주간 수행</h2>
+      <div className="mt-4 flex h-16 items-end gap-2">
+        {rows.map((row) => (
+          <div key={row.week} className="flex flex-1 flex-col items-center gap-1">
+            <div className="w-full rounded-sm bg-emerald-500" style={{ height: `${Math.max(4, (row.sessions / 4) * 48)}px` }} />
+            <span className="text-[10px] text-app-muted">{row.sessions}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SessionHistoryCard({ session }) {
+  return (
+    <div className="rounded-md bg-app-bg p-3">
+      <div className="flex items-start justify-between gap-2">
         <div>
-          <h2 className="font-bold text-white">진행 차트</h2>
-          <p className="mt-1 text-sm text-app-muted">최근 12세션 기준</p>
+          <h3 className="font-bold text-white">{session.routine} · {session.routineTitle}</h3>
+          <p className="text-xs text-app-muted">{formatDate(session.date)}</p>
         </div>
-        <div className="text-right text-xs text-app-muted">
-          <p>볼륨 {formatSigned(volumeDiff)}</p>
-          <p>반복 {formatSigned(repsDiff)}</p>
-        </div>
+        <span className="text-xs text-app-muted">{formatNumber(sessionVolume(session))}</span>
       </div>
-      <div className="mt-4 grid grid-cols-2 gap-2">
-        <Info label="최근 볼륨" value={formatNumber(latest?.volume || 0)} />
-        <Info label="최근 총합" value={`${latest?.totalReps || 0}회`} />
-      </div>
-      <div className="mt-4 h-40 rounded-md bg-app-bg p-3">
-        <div className="flex h-full items-end gap-2">
-          {points.map((point) => (
-            <div key={point.id} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1">
-              <div className="relative flex h-28 w-full items-end justify-center rounded-sm bg-[#1b1b27]">
-                <div
-                  className="absolute bottom-0 w-full rounded-sm bg-app-accent"
-                  style={{ height: `${Math.max(4, (point.volume / maxVolume) * 100)}%` }}
-                  title={`볼륨 ${formatNumber(point.volume)}`}
-                />
-                <div
-                  className="absolute bottom-0 w-1/2 rounded-sm bg-emerald-400/80"
-                  style={{ height: `${Math.max(4, (point.totalReps / maxReps) * 100)}%` }}
-                  title={`반복 ${point.totalReps}`}
-                />
-              </div>
-              <span className="text-[10px] font-bold text-white">{point.label}</span>
-              <span className="text-[10px] text-app-muted">{point.date}</span>
+      {session.notes && <p className="mt-3 rounded-md bg-app-card px-3 py-2 text-sm text-app-muted">{session.notes}</p>}
+      <div className="mt-3 space-y-2">
+        {(session.exercises || []).map((exercise) => (
+          <div key={exercise.id} className="rounded-md bg-app-card px-3 py-2 text-sm">
+            <div className="flex justify-between gap-2">
+              <span className="font-semibold text-white">{exercise.name}</span>
+              <span className="text-app-muted">{exercise.totalReps}</span>
             </div>
-          ))}
-        </div>
-      </div>
-      <div className="mt-3 flex gap-3 text-xs text-app-muted">
-        <span><span className="mr-1 inline-block h-2 w-2 rounded-sm bg-app-accent" />추적 볼륨</span>
-        <span><span className="mr-1 inline-block h-2 w-2 rounded-sm bg-emerald-400" />총 반복수</span>
+            <p className="mt-1 text-app-muted">
+              {(exercise.sets || []).map((set) => `${set.weight}kg x ${set.reps}`).join(" / ") || `${exercise.weight}kg · ${exercise.reps?.join(", ")}`}
+            </p>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
-function SettingsView({
-  exerciseData,
-  recoveryCode,
-  recoveryInput,
-  setRecoveryInput,
-  onRecover,
-  onWeight,
-  onIncrement,
-  onDeload,
-  onReset,
-  busy,
-}) {
+function SettingsView({ state, recoveryCode, recoveryInput, setRecoveryInput, onRecover, onProfile, onDeload, onReset, busy }) {
   const [copied, setCopied] = useState(false);
 
   async function copyCode() {
@@ -578,21 +626,14 @@ function SettingsView({
           <h2 className="font-bold text-white">복구 코드</h2>
         </div>
         <div className="mt-3 flex items-center gap-2">
-          <div className="flex-1 rounded-md bg-app-bg px-3 py-3 text-xl font-black tracking-[0.18em] text-white">
-            {recoveryCode || "생성 중"}
-          </div>
+          <div className="flex-1 rounded-md bg-app-bg px-3 py-3 text-xl font-black tracking-[0.18em] text-white">{recoveryCode || "생성 중"}</div>
           <button onClick={copyCode} className="rounded-md bg-app-accent p-3 text-white" title="복사">
             <Copy className="h-5 w-5" />
           </button>
         </div>
         <p className="mt-2 text-sm text-app-muted">{copied ? "복사됨" : "브라우저 데이터를 지웠을 때 이 코드로 다시 연결합니다."}</p>
         <div className="mt-4 flex gap-2">
-          <input
-            value={recoveryInput}
-            onChange={(event) => setRecoveryInput(event.target.value.toUpperCase())}
-            placeholder="복구 코드 입력"
-            className="min-w-0 flex-1 rounded-md border border-app-line bg-app-bg px-3 text-white outline-none focus:border-app-accent"
-          />
+          <input value={recoveryInput} onChange={(event) => setRecoveryInput(event.target.value.toUpperCase())} placeholder="복구 코드 입력" className="min-w-0 flex-1 rounded-md border border-app-line bg-app-bg px-3 text-white outline-none focus:border-app-accent" />
           <button onClick={onRecover} disabled={busy} className="rounded-md border border-app-line px-4 font-bold text-white disabled:opacity-50">
             연결
           </button>
@@ -600,46 +641,32 @@ function SettingsView({
       </div>
 
       <div className="rounded-lg border border-app-line bg-app-card p-4">
-        <h2 className="font-bold text-white">중량과 증량폭</h2>
+        <h2 className="font-bold text-white">운동별 중량</h2>
         <div className="mt-3 space-y-3">
-          {TRACKED_EXERCISES.map((exercise) => {
-            const data = dataWithSharedLoad(exercise, exerciseData);
+          {PROFILE_LIST.map((profile) => {
+            const data = state.profileData[profile.id] || {};
             return (
-              <div key={exercise.id} className="rounded-md bg-app-bg p-3">
+              <div key={profile.id} className="rounded-md bg-app-bg p-3">
                 <div className="flex items-start justify-between gap-3">
                   <span>
-                    <span className="block text-sm font-semibold text-white">{exercise.name}</span>
-                    <span className="text-xs text-app-muted">
-                      {weightBasisLabel(exercise)} · {exercise.min}~{exercise.max}
-                      {exercise.isTime ? "초" : "회"}
-                    </span>
+                    <span className="block text-sm font-semibold text-white">{profile.name}</span>
+                    <span className="text-xs text-app-muted">{profile.displayNote || weightBasisLabel(profile)}</span>
                   </span>
+                  {profile.kneeSensitive && <Badge amber>무릎</Badge>}
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-2">
-                  <label>
-                    <span className="mb-1 block text-xs text-app-muted">현재</span>
-                    <input
-                      type="number"
-                      step="0.5"
-                      value={data.weight || ""}
-                      placeholder="kg"
-                      onChange={(event) => onWeight(exercise.id, event.target.value)}
-                      disabled={exercise.isTime}
-                      className="h-11 w-full rounded-md border border-app-line bg-[#0f0f16] px-2 text-right text-white outline-none focus:border-app-accent disabled:opacity-40"
-                    />
-                  </label>
-                  <label>
-                    <span className="mb-1 block text-xs text-app-muted">증량폭</span>
-                    <input
-                      type="number"
-                      step="0.5"
-                      value={data.incrementStep ?? defaultIncrementFor(exercise)}
-                      placeholder="kg"
-                      onChange={(event) => onIncrement(exercise.id, event.target.value)}
-                      disabled={exercise.isTime}
-                      className="h-11 w-full rounded-md border border-app-line bg-[#0f0f16] px-2 text-right text-white outline-none focus:border-app-accent disabled:opacity-40"
-                    />
-                  </label>
+                  <NumberField
+                    label="현재"
+                    value={data.weight || ""}
+                    disabled={profile.isTime}
+                    onChange={(value) => onProfile(profile.id, { weight: Number(value || 0), initialized: Number(value) > 0 || profile.isTime })}
+                  />
+                  <NumberField
+                    label="증량폭"
+                    value={data.incrementStep ?? profile.defaultIncrement}
+                    disabled={profile.isTime}
+                    onChange={(value) => onProfile(profile.id, { incrementStep: Math.max(0, Number(value || 0)) })}
+                  />
                 </div>
               </div>
             );
@@ -650,8 +677,7 @@ function SettingsView({
       <div className="rounded-lg border border-app-line bg-app-card p-4">
         <h2 className="font-bold text-white">과부하 규칙</h2>
         <p className="mt-2 text-sm leading-6 text-app-muted">
-          지난 총합보다 1회 이상 늘면 성공. 모든 세트가 상한에 닿으면 설정한 증량폭만큼 자동 증량합니다.
-          바벨은 한쪽 원판 기준, 덤벨은 개당 기준으로 적으면 됩니다. 무릎 주의 종목은 다음 세션의 무릎 체크가 통과해야 증량됩니다.
+          총 반복수가 지난 같은 세션보다 늘면 성공입니다. 상한을 모두 채우면 앵커 세션에서만 공유 중량이 올라가고, 정체 카운트는 세션별로 따로 쌓입니다.
         </p>
         <div className="mt-4 grid grid-cols-2 gap-2">
           <button onClick={onDeload} className="flex items-center justify-center gap-2 rounded-md border border-app-line py-3 font-bold text-white">
@@ -667,17 +693,34 @@ function SettingsView({
   );
 }
 
-function ExerciseCard({ exercise, data, children }) {
-  const meta = CATEGORY_META[exercise.category];
+function ExerciseCard({ exercise, view }) {
+  return (
+    <ExerciseLogCard exercise={exercise} view={view}>
+      <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+        <Info label="현재" value={view.initialized || view.isTime ? formatWeight(view.weight, view) : "설정 필요"} />
+        <Info label="목표" value={`총 ${Number(view.targetTotal || exercise.defaultSets * exercise.min)} ${view.isTime ? "초" : "회"} 이상`} />
+        <Info label="구성" value={`${view.currentSets || exercise.defaultSets}세트 x ${exercise.min}~${exercise.max}${view.isTime ? "초" : "회"}`} />
+        <Info label="정체" value={`${view.stagnationCount || 0}회`} warn={Number(view.stagnationCount || 0) > 0} />
+      </div>
+      {view.kneeCheckPending && <p className="mt-3 rounded-md bg-amber-500/15 px-3 py-2 text-sm text-amber-200">무릎 상태 체크 대기 중</p>}
+    </ExerciseLogCard>
+  );
+}
+
+function ExerciseLogCard({ exercise, view, children }) {
+  const meta = CATEGORY_META[view.category];
   return (
     <article className="rounded-lg border border-app-line bg-app-card p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="break-keep text-lg font-bold text-white">{exercise.name}</h3>
-          <p className="mt-1 text-sm text-app-muted">{data.currentSets || exercise.defaultSets}세트 · {exercise.min}~{exercise.max}{exercise.isTime ? "초" : "회"}</p>
+          <h3 className="break-keep text-lg font-bold text-white">{view.name}</h3>
+          <p className="mt-1 text-sm text-app-muted">
+            {view.currentSets || exercise.defaultSets}세트 · {exercise.min}~{exercise.max}
+            {view.isTime ? "초" : "회"} {exercise.anchorSession ? "· 앵커" : "· 공유 중량"}
+          </p>
         </div>
         <span className="shrink-0 rounded-md px-2 py-1 text-xs font-bold text-white" style={{ backgroundColor: meta.color }}>
-          {meta.label}
+          {view.kneeSensitive ? "무릎 주의" : meta.label}
         </span>
       </div>
       {children}
@@ -694,18 +737,22 @@ function RepInput({ value, min, max, unit, onChange }) {
         <Minus className="h-5 w-5" />
       </button>
       <div className={`flex h-11 items-center rounded-md border bg-app-bg ${tone}`}>
-        <input
-          type="number"
-          value={value}
-          onChange={(event) => onChange(Number(event.target.value || 0))}
-          className="min-w-0 flex-1 bg-transparent px-3 text-center font-bold outline-none"
-        />
+        <input type="number" value={value} onChange={(event) => onChange(Number(event.target.value || 0))} className="min-w-0 flex-1 bg-transparent px-3 text-center font-bold outline-none" />
         <span className="pr-3 text-sm text-app-muted">{unit}</span>
       </div>
       <button onClick={() => onChange(number + 1)} className="flex h-11 items-center justify-center rounded-md bg-app-bg text-white">
         <Plus className="h-5 w-5" />
       </button>
     </div>
+  );
+}
+
+function NumberField({ label, value, onChange, disabled }) {
+  return (
+    <label>
+      <span className="mb-1 block text-xs text-app-muted">{label}</span>
+      <input type="number" step="0.5" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} className="h-11 w-full rounded-md border border-app-line bg-[#0f0f16] px-2 text-right text-white outline-none focus:border-app-accent disabled:opacity-40" />
+    </label>
   );
 }
 
@@ -716,6 +763,10 @@ function Info({ label, value, warn }) {
       <p className={`mt-1 font-bold ${warn ? "text-amber-200" : "text-white"}`}>{value}</p>
     </div>
   );
+}
+
+function Badge({ children, amber }) {
+  return <span className={`rounded-md px-2 py-1 text-xs font-bold ${amber ? "bg-amber-500/20 text-amber-200" : "bg-app-bg text-app-muted"}`}>{children}</span>;
 }
 
 function Empty({ title, text }) {
@@ -732,53 +783,36 @@ function Shell({ children }) {
   return <div className="min-h-screen bg-app-bg text-app-text">{children}</div>;
 }
 
-function formatWeight(weight, exercise) {
-  if (exercise.isTime || exercise.equipment === "bodyweight") return "체중";
-  if (exercise.equipment === "barbell") return `${Number(weight || 0)}kg / 한쪽`;
-  if (exercise.equipment === "dumbbell") return `${Number(weight || 0)}kg / 개당`;
+function groupHistoryByDate(history) {
+  const groups = new Map();
+  for (const session of history) {
+    const key = dateKey(session.date);
+    if (!groups.has(key)) groups.set(key, { key, label: formatDateOnly(session.date), sessions: [], volume: 0 });
+    const group = groups.get(key);
+    group.sessions.push(session);
+    group.volume += sessionVolume(session);
+  }
+  return Array.from(groups.values()).sort((a, b) => (a.key < b.key ? 1 : -1));
+}
+
+function formatWeight(weight, profile) {
+  if (profile.isTime || profile.equipment === "bodyweight") return "체중";
+  if (profile.equipment === "barbell") return `${Number(weight || 0)}kg / 한쪽`;
+  if (profile.equipment === "dumbbell") return `${Number(weight || 0)}kg / 개당`;
+  if (profile.equipment === "machine_side") return `${Number(weight || 0)}kg / 한쪽`;
   return `${Number(weight || 0)}kg`;
 }
 
-function formatHistoryWeight(historyExercise) {
-  const exercise = ALL_EXERCISES.find((item) => item.id === historyExercise.id);
-  if (!exercise) return `${Number(historyExercise.weight || 0)}kg`;
-  return formatWeight(historyExercise.weight, exercise);
-}
-
 function formatDate(value) {
-  const date = value?.toDate ? value.toDate() : value ? new Date(value) : new Date();
-  return new Intl.DateTimeFormat("ko-KR", {
-    month: "long",
-    day: "numeric",
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+  return new Intl.DateTimeFormat("ko-KR", { month: "long", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit" }).format(toDate(value));
 }
 
-function formatShortDate(value) {
-  const date = value?.toDate ? value.toDate() : value ? new Date(value) : new Date();
-  return new Intl.DateTimeFormat("ko-KR", {
-    month: "numeric",
-    day: "numeric",
-  }).format(date);
-}
-
-function formatSigned(value) {
-  const number = Math.round(Number(value || 0));
-  if (number > 0) return `+${formatNumber(number)}`;
-  return formatNumber(number);
+function formatDateOnly(value) {
+  return new Intl.DateTimeFormat("ko-KR", { month: "long", day: "numeric", weekday: "short" }).format(toDate(value));
 }
 
 function formatNumber(value) {
   return new Intl.NumberFormat("ko-KR").format(Math.round(Number(value || 0)));
-}
-
-function dateMs(value) {
-  if (!value) return 0;
-  if (value.toMillis) return value.toMillis();
-  if (value.toDate) return value.toDate().getTime();
-  return new Date(value).getTime();
 }
 
 function makeRecoveryCode() {

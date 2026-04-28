@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "check": "node scripts/check.mjs",
+    "typecheck": "node scripts/check.mjs",
     "preview": "vite preview",
     "deploy": "npm run build"
   },

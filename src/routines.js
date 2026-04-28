@@ -5,86 +5,177 @@ export const CATEGORY_META = {
   isolation: { label: "고립", color: "#10b981" },
 };
 
-export const ROUTINES = [
-  {
-    id: "a1",
-    name: "A1",
-    day: "월",
-    title: "벤치 중심 + 쿼드 + 코어",
-    exercises: [
-      item("bench_press", "벤치프레스", 3, 8, 12, "upper_main", "barbell"),
-      item("lat_pulldown", "랫풀다운", 3, 8, 12, "upper_main", "machine"),
-      item("incline_db_press", "인클라인 덤벨프레스", 2, 8, 12, "upper_main", "dumbbell"),
-      item("leg_press", "레그프레스", 3, 10, 15, "knee_sensitive", "machine"),
-      item("lateral_raise", "사이드 레터럴 레이즈", 3, 15, 25, "isolation", "dumbbell"),
-      item("cable_crunch", "케이블 크런치", 3, 10, 15, "isolation", "machine"),
-    ],
-  },
-  {
-    id: "b1",
-    name: "B1",
-    day: "화",
-    title: "숄더프레스 중심 + 후면사슬 + 팔",
-    exercises: [
-      item("romanian_deadlift", "루마니안 데드리프트", 3, 8, 12, "posterior", "barbell"),
-      item("shoulder_press", "숄더프레스", 3, 8, 12, "upper_main", "barbell"),
-      item("seated_cable_row", "시티드 케이블 로우", 3, 8, 12, "upper_main", "machine"),
-      item("leg_curl", "레그컬", 3, 10, 15, "isolation", "machine"),
-      item("triceps_pushdown", "트라이셉스 푸쉬다운", 2, 10, 15, "isolation", "machine"),
-      item("ez_bar_curl", "EZ바 컬", 2, 10, 15, "isolation", "machine"),
-      item("face_pull", "페이스풀", 2, 12, 15, "isolation", "machine"),
-    ],
-  },
-  {
-    id: "a2",
-    name: "A2",
-    day: "목",
-    title: "인클라인 중심 + 쿼드 + 코어",
-    exercises: [
-      item("incline_bench_press", "인클라인 벤치프레스", 3, 8, 12, "upper_main", "barbell"),
-      item("neutral_lat_pulldown", "뉴트럴그립 랫풀다운", 2, 8, 12, "upper_main", "machine"),
-      item("cable_fly", "케이블 플라이", 2, 10, 15, "isolation", "machine"),
-      item("leg_press_a2", "레그프레스", 2, 12, 15, "knee_sensitive", "machine", false, "leg_press"),
-      item("leg_extension", "레그 익스텐션", 2, 10, 15, "knee_sensitive", "machine"),
-      item("lateral_raise_a2", "사이드 레터럴 레이즈", 2, 15, 25, "isolation", "dumbbell", false, "lateral_raise"),
-      item("reverse_crunch", "리버스 크런치", 3, 10, 15, "isolation", "machine"),
-    ],
-  },
-  {
-    id: "b2",
-    name: "B2",
-    day: "금",
-    title: "등 보강 + 둔근/햄 + 팔",
-    exercises: [
-      item("hip_thrust", "힙쓰러스트", 3, 8, 12, "posterior", "machine"),
-      item("chest_supported_row", "체스트 서포티드 로우", 3, 8, 12, "upper_main", "machine"),
-      item("lat_pulldown_b2", "랫풀다운", 2, 10, 12, "upper_main", "machine", false, "lat_pulldown"),
-      item("leg_curl_b2", "레그컬", 2, 10, 15, "isolation", "machine", false, "leg_curl"),
-      item("hammer_curl", "해머 컬", 2, 10, 15, "isolation", "dumbbell"),
-      item("overhead_triceps_extension", "오버헤드 트라이셉스 익스텐션", 2, 10, 15, "isolation", "machine"),
-      item("plank", "플랭크", 2, 30, 45, "isolation", "bodyweight", true),
-    ],
-  },
+export const MUSCLE_GROUPS = [
+  { id: "chest", label: "가슴", color: "#ef4444" },
+  { id: "back", label: "등", color: "#3b82f6" },
+  { id: "lateral_delts", label: "측면 어깨", color: "#6366f1" },
+  { id: "rear_delts", label: "후면 어깨", color: "#8b5cf6" },
+  { id: "quads", label: "대퇴사두", color: "#f59e0b" },
+  { id: "hamstrings_glutes", label: "햄/둔근", color: "#a855f7" },
+  { id: "biceps", label: "이두", color: "#10b981" },
+  { id: "triceps", label: "삼두", color: "#14b8a6" },
+  { id: "core", label: "코어", color: "#eab308" },
 ];
 
-export const ALL_EXERCISES = ROUTINES.flatMap((routine) => routine.exercises);
-export const TRACKED_EXERCISES = Array.from(
-  new Map(ALL_EXERCISES.map((exercise) => [exercise.groupId, exercise])).values()
-);
+export const EXERCISE_PROFILES = {
+  bench_press: profile("bench_press", "벤치프레스", "upper_main", "barbell", 2.5, 50, {
+    chest: 1,
+    triceps: 0.45,
+  }),
+  lat_pulldown: profile("lat_pulldown", "랫풀다운", "upper_main", "machine", 2.5, 45, {
+    back: 1,
+    biceps: 0.35,
+  }),
+  incline_db_press: profile("incline_db_press", "인클라인 덤벨프레스", "upper_main", "dumbbell", 1, 0, {
+    chest: 0.9,
+    triceps: 0.35,
+  }),
+  leg_press: profile("leg_press", "레그프레스", "knee_sensitive", "machine_side", 2.5, 50, {
+    quads: 1,
+    hamstrings_glutes: 0.35,
+  }, { kneeSensitive: true, displayNote: "머신 한쪽 50kg 기준" }),
+  lateral_raise: profile("lateral_raise", "사이드 레터럴 레이즈", "isolation", "dumbbell", 1, 0, {
+    lateral_delts: 1,
+  }),
+  cable_crunch: profile("cable_crunch", "케이블 크런치", "isolation", "machine", 2.5, 0, {
+    core: 1,
+  }),
+  romanian_deadlift: profile("romanian_deadlift", "루마니안 데드리프트", "posterior", "barbell", 2.5, 0, {
+    hamstrings_glutes: 1,
+    back: 0.25,
+  }),
+  seated_db_shoulder_press: profile("seated_db_shoulder_press", "시티드 덤벨 숄더프레스", "upper_main", "dumbbell", 1, 12.5, {
+    lateral_delts: 0.75,
+    triceps: 0.45,
+  }, { displayNote: "덤벨 개당 12.5kg 기준" }),
+  seated_cable_row: profile("seated_cable_row", "시티드 케이블 로우", "upper_main", "machine", 2.5, 45, {
+    back: 1,
+    biceps: 0.3,
+    rear_delts: 0.25,
+  }),
+  leg_curl: profile("leg_curl", "레그컬", "isolation", "machine", 2.5, 0, {
+    hamstrings_glutes: 1,
+  }),
+  triceps_pushdown: profile("triceps_pushdown", "트라이셉스 푸쉬다운", "isolation", "machine", 2.5, 0, {
+    triceps: 1,
+  }),
+  ez_bar_curl: profile("ez_bar_curl", "EZ바 컬", "isolation", "machine", 2.5, 0, {
+    biceps: 1,
+  }),
+  face_pull: profile("face_pull", "페이스풀", "isolation", "machine", 2.5, 0, {
+    rear_delts: 1,
+    back: 0.25,
+  }),
+  incline_bench_press: profile("incline_bench_press", "인클라인 벤치프레스", "upper_main", "barbell", 2.5, 0, {
+    chest: 1,
+    triceps: 0.4,
+  }),
+  neutral_lat_pulldown: profile("neutral_lat_pulldown", "뉴트럴그립 랫풀다운", "upper_main", "machine", 2.5, 0, {
+    back: 1,
+    biceps: 0.35,
+  }),
+  cable_fly: profile("cable_fly", "케이블 플라이", "isolation", "machine", 2.5, 0, {
+    chest: 1,
+  }),
+  leg_extension: profile("leg_extension", "레그 익스텐션", "knee_sensitive", "machine", 2.5, 0, {
+    quads: 1,
+  }, { kneeSensitive: true }),
+  reverse_crunch: profile("reverse_crunch", "리버스 크런치", "isolation", "bodyweight", 0, 0, {
+    core: 1,
+  }),
+  hip_thrust: profile("hip_thrust", "힙쓰러스트", "posterior", "machine", 2.5, 0, {
+    hamstrings_glutes: 1,
+  }),
+  chest_supported_row: profile("chest_supported_row", "체스트 서포티드 로우", "upper_main", "machine", 2.5, 0, {
+    back: 1,
+    rear_delts: 0.25,
+    biceps: 0.3,
+  }),
+  hammer_curl: profile("hammer_curl", "해머 컬", "isolation", "dumbbell", 1, 0, {
+    biceps: 1,
+  }),
+  overhead_triceps_extension: profile("overhead_triceps_extension", "오버헤드 트라이셉스 익스텐션", "isolation", "machine", 2.5, 0, {
+    triceps: 1,
+  }),
+  plank: profile("plank", "플랭크", "isolation", "bodyweight", 0, 0, {
+    core: 1,
+  }, { isTime: true }),
+};
 
-export function createInitialExerciseData() {
+export const ROUTINES = [
+  session("a1", "A1", "월", "벤치 중심 + 쿼드 + 코어", [
+    inst("a1_bench_press", "bench_press", 3, 8, 12, true),
+    inst("a1_lat_pulldown", "lat_pulldown", 3, 8, 12, true),
+    inst("a1_incline_db_press", "incline_db_press", 2, 8, 12, true),
+    inst("a1_leg_press", "leg_press", 3, 10, 15, true),
+    inst("a1_lateral_raise", "lateral_raise", 3, 15, 25, true),
+    inst("a1_cable_crunch", "cable_crunch", 3, 10, 15, true),
+  ]),
+  session("b1", "B1", "화", "숄더프레스 중심 + 후면사슬 + 팔", [
+    inst("b1_romanian_deadlift", "romanian_deadlift", 3, 8, 12, true),
+    inst("b1_seated_db_shoulder_press", "seated_db_shoulder_press", 3, 8, 12, true),
+    inst("b1_seated_cable_row", "seated_cable_row", 3, 8, 12, true),
+    inst("b1_leg_curl", "leg_curl", 3, 10, 15, true),
+    inst("b1_triceps_pushdown", "triceps_pushdown", 2, 10, 15, true),
+    inst("b1_ez_bar_curl", "ez_bar_curl", 2, 10, 15, true),
+    inst("b1_face_pull", "face_pull", 2, 12, 15, true),
+  ]),
+  session("a2", "A2", "목", "인클라인 중심 + 쿼드 + 코어", [
+    inst("a2_incline_bench_press", "incline_bench_press", 3, 8, 12, true),
+    inst("a2_neutral_lat_pulldown", "neutral_lat_pulldown", 2, 8, 12, true),
+    inst("a2_cable_fly", "cable_fly", 2, 10, 15, true),
+    inst("a2_leg_press", "leg_press", 2, 12, 15, false),
+    inst("a2_leg_extension", "leg_extension", 2, 10, 15, true),
+    inst("a2_lateral_raise", "lateral_raise", 2, 15, 25, false),
+    inst("a2_reverse_crunch", "reverse_crunch", 3, 10, 15, true),
+  ]),
+  session("b2", "B2", "금", "등 보강 + 둔근/햄 + 팔", [
+    inst("b2_hip_thrust", "hip_thrust", 3, 8, 12, true),
+    inst("b2_chest_supported_row", "chest_supported_row", 3, 8, 12, true),
+    inst("b2_lat_pulldown", "lat_pulldown", 2, 10, 12, false),
+    inst("b2_leg_curl", "leg_curl", 2, 10, 15, false),
+    inst("b2_hammer_curl", "hammer_curl", 2, 10, 15, true),
+    inst("b2_overhead_triceps_extension", "overhead_triceps_extension", 2, 10, 15, true),
+    inst("b2_plank", "plank", 2, 30, 45, true),
+  ]),
+];
+
+export const PROFILE_LIST = Object.values(EXERCISE_PROFILES);
+export const SESSION_EXERCISES = ROUTINES.flatMap((routine) =>
+  routine.exercises.map((exercise) => ({ ...exercise, sessionId: routine.id, sessionName: routine.name }))
+);
+export const ANCHOR_PROFILE_IDS = [
+  "bench_press",
+  "seated_db_shoulder_press",
+  "lat_pulldown",
+  "leg_press",
+  "romanian_deadlift",
+  "hip_thrust",
+];
+
+export function createInitialProfileData() {
   return Object.fromEntries(
-    ALL_EXERCISES.map((exercise) => [
+    PROFILE_LIST.map((profileItem) => [
+      profileItem.id,
+      {
+        weight: profileItem.defaultWeight,
+        incrementStep: profileItem.defaultIncrement,
+        initialized: profileItem.defaultWeight > 0 || profileItem.isTime,
+        kneeCheckPending: false,
+      },
+    ])
+  );
+}
+
+export function createInitialInstanceData() {
+  return Object.fromEntries(
+    SESSION_EXERCISES.map((exercise) => [
       exercise.id,
       {
-        weight: 0,
-        incrementStep: defaultIncrementFor(exercise),
         lastReps: [],
         targetTotal: exercise.defaultSets * exercise.min,
         stagnationCount: 0,
         currentSets: exercise.defaultSets,
-        kneeCheckPending: false,
-        initialized: false,
       },
     ])
   );
@@ -92,41 +183,144 @@ export function createInitialExerciseData() {
 
 export function createInitialState() {
   return {
+    schemaVersion: 2,
     currentRoutineIndex: 0,
     sessionCount: 0,
-    exerciseData: createInitialExerciseData(),
+    profileData: createInitialProfileData(),
+    instanceData: createInitialInstanceData(),
     updatedAt: Date.now(),
   };
 }
 
-function item(id, name, defaultSets, min, max, category, equipment, isTime = false, groupId = id) {
-  return { id, groupId, name, defaultSets, min, max, category, equipment, isTime };
+export function migrateState(rawState) {
+  const base = createInitialState();
+  if (!rawState) return base;
+
+  const migrated = {
+    ...base,
+    ...rawState,
+    schemaVersion: 2,
+    profileData: { ...base.profileData, ...(rawState.profileData || {}) },
+    instanceData: { ...base.instanceData, ...(rawState.instanceData || {}) },
+  };
+
+  if (rawState.exerciseData && !rawState.profileData) {
+    for (const exercise of SESSION_EXERCISES) {
+      const old = rawState.exerciseData[legacyIdFor(exercise)] || rawState.exerciseData[exercise.profileId];
+      if (!old) continue;
+      migrated.instanceData[exercise.id] = {
+        ...migrated.instanceData[exercise.id],
+        lastReps: old.lastReps || [],
+        targetTotal: Number(old.targetTotal || exercise.defaultSets * exercise.min),
+        stagnationCount: Number(old.stagnationCount || 0),
+        currentSets: Number(old.currentSets || exercise.defaultSets),
+      };
+      migrated.profileData[exercise.profileId] = {
+        ...migrated.profileData[exercise.profileId],
+        weight: Number(old.weight ?? migrated.profileData[exercise.profileId].weight ?? 0),
+        incrementStep: Number(old.incrementStep ?? migrated.profileData[exercise.profileId].incrementStep ?? defaultIncrementFor(profileById(exercise.profileId))),
+        initialized: Boolean(old.initialized || migrated.profileData[exercise.profileId].initialized),
+        kneeCheckPending: Boolean(old.kneeCheckPending || migrated.profileData[exercise.profileId].kneeCheckPending),
+      };
+    }
+  }
+
+  return migrated;
 }
 
-export function groupMembers(groupId) {
-  return ALL_EXERCISES.filter((exercise) => exercise.groupId === groupId);
+export function profileById(profileId) {
+  return EXERCISE_PROFILES[profileId];
 }
 
-export function dataWithSharedLoad(exercise, exerciseData = {}) {
-  const own = exerciseData[exercise.id] || {};
-  const shared = exerciseData[exercise.groupId] || {};
+export function instanceById(instanceId) {
+  return SESSION_EXERCISES.find((exercise) => exercise.id === instanceId);
+}
+
+export function instanceView(exercise, state) {
+  const migrated = migrateState(state);
+  const profileItem = profileById(exercise.profileId);
   return {
-    ...own,
-    weight: Number(shared.weight ?? own.weight ?? 0),
-    incrementStep: Number(shared.incrementStep ?? own.incrementStep ?? defaultIncrementFor(exercise)),
-    initialized: Boolean(shared.initialized || own.initialized || exercise.isTime),
+    ...exercise,
+    ...profileItem,
+    instanceId: exercise.id,
+    profileId: profileItem.id,
+    profileName: profileItem.name,
+    ...migrated.instanceData[exercise.id],
+    ...migrated.profileData[profileItem.id],
   };
 }
 
-export function defaultIncrementFor(exercise) {
-  if (exercise.equipment === "dumbbell") return 1;
-  if (exercise.equipment === "bodyweight") return 0;
-  return 2.5;
+export function sessionSummary(routine) {
+  const totalSets = routine.exercises.reduce((acc, exercise) => acc + exercise.defaultSets, 0);
+  const hasKneeSensitive = routine.exercises.some((exercise) => profileById(exercise.profileId).kneeSensitive);
+  return { totalSets, hasKneeSensitive, exerciseCount: routine.exercises.length };
 }
 
-export function weightBasisLabel(exercise) {
-  if (exercise.equipment === "barbell") return "한쪽 원판 기준";
-  if (exercise.equipment === "dumbbell") return "덤벨 개당 기준";
-  if (exercise.equipment === "bodyweight") return "시간/체중";
+export function defaultIncrementFor(profileItem) {
+  if (!profileItem) return 0;
+  return profileItem.defaultIncrement || 0;
+}
+
+export function weightBasisLabel(profileItem) {
+  if (profileItem.equipment === "barbell") return "한쪽 원판 기준";
+  if (profileItem.equipment === "dumbbell") return "덤벨 개당 기준";
+  if (profileItem.equipment === "machine_side") return "머신 한쪽 기준";
+  if (profileItem.equipment === "bodyweight") return "시간/체중";
   return "머신 표시 기준";
+}
+
+function profile(id, name, category, equipment, defaultIncrement, defaultWeight, muscleFactors, options = {}) {
+  return {
+    id,
+    name,
+    category,
+    equipment,
+    defaultIncrement,
+    defaultWeight,
+    muscleFactors,
+    kneeSensitive: Boolean(options.kneeSensitive),
+    isTime: Boolean(options.isTime),
+    displayNote: options.displayNote || "",
+  };
+}
+
+function session(id, name, day, title, exercises) {
+  return { id, name, day, title, exercises };
+}
+
+function inst(id, profileId, defaultSets, min, max, anchorSession) {
+  return { id, profileId, defaultSets, min, max, anchorSession };
+}
+
+function legacyIdFor(exercise) {
+  const map = {
+    a1_bench_press: "bench_press",
+    a1_lat_pulldown: "lat_pulldown",
+    a1_incline_db_press: "incline_db_press",
+    a1_leg_press: "leg_press",
+    a1_lateral_raise: "lateral_raise",
+    a1_cable_crunch: "cable_crunch",
+    b1_romanian_deadlift: "romanian_deadlift",
+    b1_seated_db_shoulder_press: "shoulder_press",
+    b1_seated_cable_row: "seated_cable_row",
+    b1_leg_curl: "leg_curl",
+    b1_triceps_pushdown: "triceps_pushdown",
+    b1_ez_bar_curl: "ez_bar_curl",
+    b1_face_pull: "face_pull",
+    a2_incline_bench_press: "incline_bench_press",
+    a2_neutral_lat_pulldown: "neutral_lat_pulldown",
+    a2_cable_fly: "cable_fly",
+    a2_leg_press: "leg_press_a2",
+    a2_leg_extension: "leg_extension",
+    a2_lateral_raise: "lateral_raise_a2",
+    a2_reverse_crunch: "reverse_crunch",
+    b2_hip_thrust: "hip_thrust",
+    b2_chest_supported_row: "chest_supported_row",
+    b2_lat_pulldown: "lat_pulldown_b2",
+    b2_leg_curl: "leg_curl_b2",
+    b2_hammer_curl: "hammer_curl",
+    b2_overhead_triceps_extension: "overhead_triceps_extension",
+    b2_plank: "plank",
+  };
+  return map[exercise.id] || exercise.id;
 }
