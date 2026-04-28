@@ -18,7 +18,6 @@ import { db, ensureAnonymousUser } from "./firebase";
 import {
   CATEGORY_META,
   MUSCLE_GROUPS,
-  PROFILE_LIST,
   ROUTINES,
   createInitialState,
   instanceView,
@@ -609,8 +608,67 @@ function SessionHistoryCard({ session }) {
   );
 }
 
+function SettingsSessionAccordion({ routine, state, open, onToggle, onProfile }) {
+  const summary = sessionSummary(routine);
+  return (
+    <article className="overflow-hidden rounded-md bg-app-bg">
+      <button onClick={onToggle} className="flex w-full items-center justify-between gap-3 p-3 text-left">
+        <div>
+          <div className="flex items-center gap-2">
+            <h3 className="font-black text-white">{routine.name}</h3>
+            <span className="rounded-md bg-app-card px-2 py-1 text-xs text-app-muted">{routine.day}</span>
+          </div>
+          <p className="mt-1 text-xs text-app-muted">
+            {summary.exerciseCount}종목 · {summary.totalSets}세트
+          </p>
+        </div>
+        <ChevronDown className={`h-5 w-5 text-app-muted transition ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="space-y-2 border-t border-app-line p-3">
+          {routine.exercises.map((exercise) => {
+            const profile = profileById(exercise.profileId);
+            const data = state.profileData[profile.id] || {};
+            const sharedCount = ROUTINES.flatMap((item) => item.exercises).filter((item) => item.profileId === profile.id).length;
+            return (
+              <div key={exercise.id} className="rounded-md bg-[#0f0f16] p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <span>
+                    <span className="block text-sm font-semibold text-white">{profile.name}</span>
+                    <span className="text-xs text-app-muted">
+                      {profile.displayNote || weightBasisLabel(profile)}
+                      {sharedCount > 1 ? ` · ${sharedCount}개 세션 공유` : ""}
+                      {exercise.anchorSession ? " · 앵커" : " · 공유만"}
+                    </span>
+                  </span>
+                  {profile.kneeSensitive && <Badge amber>무릎</Badge>}
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <NumberField
+                    label="현재"
+                    value={data.weight || ""}
+                    disabled={profile.isTime}
+                    onChange={(value) => onProfile(profile.id, { weight: Number(value || 0), initialized: Number(value) > 0 || profile.isTime })}
+                  />
+                  <NumberField
+                    label="증량폭"
+                    value={data.incrementStep ?? profile.defaultIncrement}
+                    disabled={profile.isTime}
+                    onChange={(value) => onProfile(profile.id, { incrementStep: Math.max(0, Number(value || 0)) })}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </article>
+  );
+}
+
 function SettingsView({ state, recoveryCode, recoveryInput, setRecoveryInput, onRecover, onProfile, onDeload, onReset, busy }) {
   const [copied, setCopied] = useState(false);
+  const [open, setOpen] = useState(() => ({ [ROUTINES[Number(state.currentRoutineIndex || 0)]?.id || "a1"]: true }));
 
   async function copyCode() {
     await navigator.clipboard.writeText(recoveryCode);
@@ -641,36 +699,19 @@ function SettingsView({ state, recoveryCode, recoveryInput, setRecoveryInput, on
       </div>
 
       <div className="rounded-lg border border-app-line bg-app-card p-4">
-        <h2 className="font-bold text-white">운동별 중량</h2>
+        <h2 className="font-bold text-white">세션별 중량</h2>
+        <p className="mt-1 text-sm text-app-muted">같은 운동 변형은 어느 세션에서 바꿔도 같이 적용됩니다.</p>
         <div className="mt-3 space-y-3">
-          {PROFILE_LIST.map((profile) => {
-            const data = state.profileData[profile.id] || {};
-            return (
-              <div key={profile.id} className="rounded-md bg-app-bg p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <span>
-                    <span className="block text-sm font-semibold text-white">{profile.name}</span>
-                    <span className="text-xs text-app-muted">{profile.displayNote || weightBasisLabel(profile)}</span>
-                  </span>
-                  {profile.kneeSensitive && <Badge amber>무릎</Badge>}
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <NumberField
-                    label="현재"
-                    value={data.weight || ""}
-                    disabled={profile.isTime}
-                    onChange={(value) => onProfile(profile.id, { weight: Number(value || 0), initialized: Number(value) > 0 || profile.isTime })}
-                  />
-                  <NumberField
-                    label="증량폭"
-                    value={data.incrementStep ?? profile.defaultIncrement}
-                    disabled={profile.isTime}
-                    onChange={(value) => onProfile(profile.id, { incrementStep: Math.max(0, Number(value || 0)) })}
-                  />
-                </div>
-              </div>
-            );
-          })}
+          {ROUTINES.map((routine) => (
+            <SettingsSessionAccordion
+              key={routine.id}
+              routine={routine}
+              state={state}
+              open={Boolean(open[routine.id])}
+              onToggle={() => setOpen((prev) => ({ ...prev, [routine.id]: !prev[routine.id] }))}
+              onProfile={onProfile}
+            />
+          ))}
         </div>
       </div>
 
