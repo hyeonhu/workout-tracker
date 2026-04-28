@@ -48,6 +48,7 @@ export default function App() {
   const [recoveryCode, setRecoveryCode] = useState(() => localStorage.getItem("recoveryCode") || "");
   const [recoveryInput, setRecoveryInput] = useState("");
   const [status, setStatus] = useState("준비 중");
+  const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -99,6 +100,19 @@ export default function App() {
     });
   }, [user, ownerUid, recoveryCode]);
 
+  useEffect(() => {
+    function updateOnlineStatus() {
+      setIsOnline(navigator.onLine);
+      setStatus(navigator.onLine ? "온라인" : "오프라인");
+    }
+    window.addEventListener("online", updateOnlineStatus);
+    window.addEventListener("offline", updateOnlineStatus);
+    return () => {
+      window.removeEventListener("online", updateOnlineStatus);
+      window.removeEventListener("offline", updateOnlineStatus);
+    };
+  }, []);
+
   const appState = state ? migrateState(state) : null;
   const routine = ROUTINES[Number(appState?.currentRoutineIndex || 0)] || ROUTINES[0];
   const pendingKnee = appState
@@ -121,7 +135,9 @@ export default function App() {
 
   async function saveState(nextState) {
     if (!ownerUid) return;
+    setStatus(isOnline ? "저장 중" : "오프라인 대기");
     await setDoc(doc(db, "users", ownerUid, "state", "current"), migrateState(nextState));
+    setStatus(isOnline ? "저장됨" : "오프라인 대기");
   }
 
   async function updateProfile(profileId, patch) {
@@ -148,6 +164,7 @@ export default function App() {
         setTab("log");
         return;
       }
+      setStatus(isOnline ? "저장 중" : "오프라인 대기");
       const result = completeSession(appState, routine, entries, kneeApprovals, sessionNotes.trim());
       await addDoc(collection(db, "users", ownerUid, "history"), {
         date: serverTimestamp(),
@@ -227,7 +244,7 @@ export default function App() {
             <p className="text-xs text-app-muted">근비대 4분할</p>
             <h1 className="text-2xl font-bold tracking-normal text-app-text">운동 트래커</h1>
           </div>
-          <div className="rounded-full border border-app-line px-3 py-1 text-xs text-app-muted">{status}</div>
+          <div className={`rounded-full border px-3 py-1 text-xs ${isOnline ? "border-app-line text-app-muted" : "border-amber-500/50 text-amber-200"}`}>{status}</div>
         </div>
       </header>
 
@@ -257,6 +274,7 @@ export default function App() {
             setRecoveryInput={setRecoveryInput}
             onRecover={recover}
             onProfile={updateProfile}
+            currentRoutine={routine}
             onDeload={manualDeload}
             onReset={resetAll}
             busy={busy}
@@ -357,6 +375,8 @@ function SessionAccordion({ routine, state, open, current, onToggle }) {
 }
 
 function LogView({ state, routine, entries, setEntries, pendingKnee, kneeApprovals, setKneeApprovals, notes, setNotes, onFinish, busy }) {
+  const summary = sessionDraftSummary(routine, state, entries);
+
   return (
     <section className="space-y-4">
       <div className="rounded-lg border border-app-line bg-app-card p-4">
@@ -367,7 +387,7 @@ function LogView({ state, routine, entries, setEntries, pendingKnee, kneeApprova
       {pendingKnee.length > 0 && (
         <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
           <h2 className="font-bold text-amber-100">무릎 상태 체크</h2>
-          <p className="mt-1 text-sm text-amber-100/80">지난 세션 이후 통증, 부종, 불안정이 없었어?</p>
+          <p className="mt-1 text-sm text-amber-100/80">지난 앵커 세션에서 상한을 달성했어요. 다음 증량 전에 통증, 부종, 불안정이 없었는지만 확인합니다.</p>
           <div className="mt-3 space-y-3">
             {pendingKnee.map((exercise) => (
               <div key={exercise.id} className="space-y-2">
@@ -395,6 +415,12 @@ function LogView({ state, routine, entries, setEntries, pendingKnee, kneeApprova
               <span className="text-app-muted">{formatWeight(view.weight, view)}</span>
               <span className="font-bold text-white">총 {sum(reps)} {view.isTime ? "초" : "회"}</span>
             </div>
+            <QuickInputBar
+              exercise={exercise}
+              view={view}
+              reps={reps}
+              setEntries={setEntries}
+            />
             <div className="mt-3 space-y-2">
               {reps.map((rep, index) => (
                 <RepInput
@@ -423,6 +449,8 @@ function LogView({ state, routine, entries, setEntries, pendingKnee, kneeApprova
         className="min-h-24 w-full rounded-lg border border-app-line bg-app-card p-4 text-white outline-none focus:border-app-accent"
       />
 
+      <SessionDraftSummary summary={summary} />
+
       <button onClick={onFinish} disabled={busy} className="flex w-full items-center justify-center gap-2 rounded-md bg-app-accent py-4 text-lg font-black text-white disabled:opacity-50">
         <Save className="h-5 w-5" />
         세션 완료
@@ -431,15 +459,72 @@ function LogView({ state, routine, entries, setEntries, pendingKnee, kneeApprova
   );
 }
 
+function QuickInputBar({ exercise, view, reps, setEntries }) {
+  const last = Array.isArray(view.lastReps) && view.lastReps.length ? view.lastReps : Array(reps.length).fill(exercise.min);
+
+  function setExerciseReps(nextReps) {
+    setEntries((prev) => ({ ...prev, [exercise.id]: nextReps }));
+  }
+
+  return (
+    <div className="mt-3 grid grid-cols-4 gap-2">
+      <button onClick={() => setExerciseReps(last.map((rep) => Number(rep || exercise.min)))} className="rounded-md bg-app-bg px-2 py-2 text-xs font-bold text-app-muted">
+        지난값
+      </button>
+      <button onClick={() => setExerciseReps(reps.map((rep) => Number(rep || 0) + 1))} className="rounded-md bg-app-bg px-2 py-2 text-xs font-bold text-app-muted">
+        전부 +1
+      </button>
+      <button onClick={() => setExerciseReps(reps.map(() => Number(reps[0] || exercise.min)))} className="rounded-md bg-app-bg px-2 py-2 text-xs font-bold text-app-muted">
+        첫세트
+      </button>
+      <button onClick={() => setExerciseReps(reps.map(() => exercise.min))} className="rounded-md bg-app-bg px-2 py-2 text-xs font-bold text-app-muted">
+        하한
+      </button>
+    </div>
+  );
+}
+
+function SessionDraftSummary({ summary }) {
+  return (
+    <div className="rounded-lg border border-app-line bg-app-card p-4">
+      <h2 className="font-bold text-white">완료 전 요약</h2>
+      <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
+        <Info label="총합" value={`${summary.totalReps}회`} />
+        <Info label="성공 예상" value={`${summary.improvedCount}종목`} />
+        <Info label="상한 달성" value={`${summary.topReadyCount}종목`} />
+      </div>
+      {summary.stallRiskCount > 0 && (
+        <p className="mt-3 rounded-md bg-amber-500/15 px-3 py-2 text-sm text-amber-200">
+          정체 가능 종목 {summary.stallRiskCount}개. 완료 후 앱이 자동으로 카운트를 반영합니다.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function HistoryView({ history }) {
   const [open, setOpen] = useState({});
+  const [showAnalytics, setShowAnalytics] = useState(false);
   const groups = useMemo(() => groupHistoryByDate(history), [history]);
 
   if (!history.length) return <Empty title="아직 기록이 없어" text="첫 세션을 완료하면 여기에 쌓입니다." />;
 
   return (
     <section className="space-y-4">
-      <AnalyticsDashboard history={history} />
+      <article className="overflow-hidden rounded-lg border border-app-line bg-app-card">
+        <button onClick={() => setShowAnalytics((value) => !value)} className="flex w-full items-center justify-between gap-3 p-4 text-left">
+          <div>
+            <h2 className="font-bold text-white">분석 보기</h2>
+            <p className="mt-1 text-sm text-app-muted">주간 볼륨, 주요 운동 진행, 수행률</p>
+          </div>
+          <ChevronDown className={`h-5 w-5 text-app-muted transition ${showAnalytics ? "rotate-180" : ""}`} />
+        </button>
+        {showAnalytics && (
+          <div className="space-y-4 border-t border-app-line p-4">
+            <AnalyticsDashboard history={history} />
+          </div>
+        )}
+      </article>
       {groups.map((group) => (
         <article key={group.key} className="overflow-hidden rounded-lg border border-app-line bg-app-card">
           <button onClick={() => setOpen((prev) => ({ ...prev, [group.key]: !prev[group.key] }))} className="flex w-full items-center justify-between gap-3 p-4 text-left">
@@ -666,9 +751,11 @@ function SettingsSessionAccordion({ routine, state, open, onToggle, onProfile })
   );
 }
 
-function SettingsView({ state, recoveryCode, recoveryInput, setRecoveryInput, onRecover, onProfile, onDeload, onReset, busy }) {
+function SettingsView({ state, recoveryCode, recoveryInput, setRecoveryInput, onRecover, onProfile, currentRoutine, onDeload, onReset, busy }) {
   const [copied, setCopied] = useState(false);
   const [open, setOpen] = useState(() => ({ [ROUTINES[Number(state.currentRoutineIndex || 0)]?.id || "a1"]: true }));
+  const [onlyToday, setOnlyToday] = useState(true);
+  const visibleRoutines = onlyToday ? [currentRoutine] : ROUTINES;
 
   async function copyCode() {
     await navigator.clipboard.writeText(recoveryCode);
@@ -683,6 +770,7 @@ function SettingsView({ state, recoveryCode, recoveryInput, setRecoveryInput, on
           <ShieldCheck className="h-5 w-5 text-app-accent" />
           <h2 className="font-bold text-white">복구 코드</h2>
         </div>
+        <p className="mt-2 rounded-md bg-app-bg px-3 py-2 text-sm text-amber-200">홈 화면 앱에서 보이는 이 코드를 따로 저장해두면 브라우저 데이터를 지워도 복구할 수 있어요.</p>
         <div className="mt-3 flex items-center gap-2">
           <div className="flex-1 rounded-md bg-app-bg px-3 py-3 text-xl font-black tracking-[0.18em] text-white">{recoveryCode || "생성 중"}</div>
           <button onClick={copyCode} className="rounded-md bg-app-accent p-3 text-white" title="복사">
@@ -699,10 +787,20 @@ function SettingsView({ state, recoveryCode, recoveryInput, setRecoveryInput, on
       </div>
 
       <div className="rounded-lg border border-app-line bg-app-card p-4">
-        <h2 className="font-bold text-white">세션별 중량</h2>
-        <p className="mt-1 text-sm text-app-muted">같은 운동 변형은 어느 세션에서 바꿔도 같이 적용됩니다.</p>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-white">세션별 중량</h2>
+            <p className="mt-1 text-sm text-app-muted">같은 운동 변형은 어느 세션에서 바꿔도 같이 적용됩니다.</p>
+          </div>
+          <button
+            onClick={() => setOnlyToday((value) => !value)}
+            className={`shrink-0 rounded-md px-3 py-2 text-xs font-bold ${onlyToday ? "bg-app-accent text-white" : "bg-app-bg text-app-muted"}`}
+          >
+            {onlyToday ? "오늘만" : "전체"}
+          </button>
+        </div>
         <div className="mt-3 space-y-3">
-          {ROUTINES.map((routine) => (
+          {visibleRoutines.map((routine) => (
             <SettingsSessionAccordion
               key={routine.id}
               routine={routine}
@@ -834,6 +932,24 @@ function groupHistoryByDate(history) {
     group.volume += sessionVolume(session);
   }
   return Array.from(groups.values()).sort((a, b) => (a.key < b.key ? 1 : -1));
+}
+
+function sessionDraftSummary(routine, state, entries) {
+  return routine.exercises.reduce(
+    (acc, exercise) => {
+      const view = instanceView(exercise, state);
+      const reps = entries[exercise.id] || [];
+      const total = sum(reps);
+      const previous = sum(view.lastReps || []);
+      const allAtTop = reps.length > 0 && reps.every((rep) => Number(rep) >= exercise.max);
+      acc.totalReps += total;
+      if (total > previous) acc.improvedCount += 1;
+      if (previous > 0 && total <= previous) acc.stallRiskCount += 1;
+      if (allAtTop) acc.topReadyCount += 1;
+      return acc;
+    },
+    { totalReps: 0, improvedCount: 0, stallRiskCount: 0, topReadyCount: 0 }
+  );
 }
 
 function formatWeight(weight, profile) {
