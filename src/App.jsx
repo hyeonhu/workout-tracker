@@ -65,6 +65,11 @@ export default function App() {
   const [status, setStatus] = useState("준비 중");
   const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [busy, setBusy] = useState(false);
+  const [todayOpenSections, setTodayOpenSections] = useState({});
+  const [historyOpenDates, setHistoryOpenDates] = useState({});
+  const [historyAnalyticsOpen, setHistoryAnalyticsOpen] = useState(true);
+  const [settingsOpenSections, setSettingsOpenSections] = useState({});
+  const [settingsOnlyToday, setSettingsOnlyToday] = useState(true);
 
   useEffect(() => {
     const unsubscribe = ensureAnonymousUser(async (nextUser) => {
@@ -309,7 +314,7 @@ export default function App() {
         <div className="mx-auto flex w-full max-w-[480px] items-center justify-between">
           <div>
             <p className="text-xs text-app-muted">근비대 4분할</p>
-            <h1 className="text-2xl font-bold tracking-normal text-app-text">운동 트래커</h1>
+            <h1 className="text-2xl font-bold tracking-normal text-app-text">증량일지</h1>
           </div>
           <div className={`rounded-full border px-3 py-1 text-xs ${isOnline ? "border-app-line text-app-muted" : "border-amber-500/50 text-amber-200"}`}>{status}</div>
         </div>
@@ -320,6 +325,8 @@ export default function App() {
           <TodayView
             state={appState}
             currentRoutine={routine}
+            openSections={todayOpenSections}
+            setOpenSections={setTodayOpenSections}
             onLog={(exerciseId = "") => {
               setLogFocusExerciseId(exerciseId);
               setTab("log");
@@ -353,6 +360,10 @@ export default function App() {
             history={history}
             bodyweightLogs={bodyweightLogs}
             recommendationCooldowns={appState.recommendationCooldowns || {}}
+            openDates={historyOpenDates}
+            setOpenDates={setHistoryOpenDates}
+            analyticsOpen={historyAnalyticsOpen}
+            setAnalyticsOpen={setHistoryAnalyticsOpen}
             onRecommendationCooldown={saveRecommendationCooldown}
             onBodyweight={addBodyweight}
           />
@@ -368,6 +379,10 @@ export default function App() {
             currentRoutine={routine}
             history={history}
             bodyweightLogs={bodyweightLogs}
+            openSections={settingsOpenSections}
+            setOpenSections={setSettingsOpenSections}
+            onlyToday={settingsOnlyToday}
+            setOnlyToday={setSettingsOnlyToday}
             onDeload={manualDeload}
             onReset={resetAll}
             busy={busy}
@@ -397,12 +412,11 @@ export default function App() {
   );
 }
 
-function TodayView({ state, currentRoutine, onLog, onSettings }) {
-  const [open, setOpen] = useState(() => ({ [currentRoutine.id]: true }));
+function TodayView({ state, currentRoutine, openSections, setOpenSections, onLog, onSettings }) {
 
   useEffect(() => {
-    setOpen((prev) => ({ ...prev, [currentRoutine.id]: true }));
-  }, [currentRoutine.id]);
+    setOpenSections((prev) => (Object.keys(prev).length ? prev : { [currentRoutine.id]: true }));
+  }, [currentRoutine.id, setOpenSections]);
 
   return (
     <section className="space-y-4">
@@ -427,9 +441,9 @@ function TodayView({ state, currentRoutine, onLog, onSettings }) {
           key={routine.id}
           routine={routine}
           state={state}
-          open={Boolean(open[routine.id])}
+          open={Boolean(openSections[routine.id])}
           current={routine.id === currentRoutine.id}
-          onToggle={() => setOpen((prev) => ({ ...prev, [routine.id]: !prev[routine.id] }))}
+          onToggle={() => setOpenSections((prev) => ({ ...prev, [routine.id]: !prev[routine.id] }))}
           onExerciseTap={(exerciseId) => onLog(exerciseId)}
         />
       ))}
@@ -495,7 +509,7 @@ function LogView({
   useEffect(() => {
     if (!focusExerciseId) return;
     const frame = requestAnimationFrame(() => {
-      document.getElementById(`log-${focusExerciseId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      document.getElementById(`log-${focusExerciseId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
       onFocusHandled();
     });
     return () => cancelAnimationFrame(frame);
@@ -653,9 +667,7 @@ function SessionDraftSummary({ summary }) {
   );
 }
 
-function HistoryView({ history, bodyweightLogs, recommendationCooldowns, onRecommendationCooldown, onBodyweight }) {
-  const [open, setOpen] = useState({});
-  const [showAnalytics, setShowAnalytics] = useState(true);
+function HistoryView({ history, bodyweightLogs, recommendationCooldowns, openDates, setOpenDates, analyticsOpen, setAnalyticsOpen, onRecommendationCooldown, onBodyweight }) {
   const groups = useMemo(() => groupHistoryByDate(history), [history]);
 
   if (!history.length) {
@@ -676,14 +688,14 @@ function HistoryView({ history, bodyweightLogs, recommendationCooldowns, onRecom
   return (
     <section className="space-y-4">
       <article className="overflow-hidden rounded-lg border border-app-line bg-app-card">
-        <button onClick={() => setShowAnalytics((value) => !value)} className="flex w-full items-center justify-between gap-3 p-4 text-left">
+        <button onClick={() => setAnalyticsOpen((value) => !value)} className="flex w-full items-center justify-between gap-3 p-4 text-left">
           <div>
             <h2 className="font-bold text-white">대시보드</h2>
             <p className="mt-1 text-sm text-app-muted">주요 운동 진행, 체중 추세, 고급 분석</p>
           </div>
-          <ChevronDown className={`h-5 w-5 text-app-muted transition ${showAnalytics ? "rotate-180" : ""}`} />
+          <ChevronDown className={`h-5 w-5 text-app-muted transition ${analyticsOpen ? "rotate-180" : ""}`} />
         </button>
-        {showAnalytics && (
+        {analyticsOpen && (
           <div className="space-y-4 border-t border-app-line p-4">
             <AnalyticsDashboard
               history={history}
@@ -697,14 +709,14 @@ function HistoryView({ history, bodyweightLogs, recommendationCooldowns, onRecom
       </article>
       {groups.map((group) => (
         <article key={group.key} className="overflow-hidden rounded-lg border border-app-line bg-app-card">
-          <button onClick={() => setOpen((prev) => ({ ...prev, [group.key]: !prev[group.key] }))} className="flex w-full items-center justify-between gap-3 p-4 text-left">
+          <button onClick={() => setOpenDates((prev) => ({ ...prev, [group.key]: !prev[group.key] }))} className="flex w-full items-center justify-between gap-3 p-4 text-left">
             <div>
               <h2 className="font-bold text-white">{group.label}</h2>
               <p className="mt-1 text-sm text-app-muted">{group.sessions.length}세션 · 총 볼륨 {formatNumber(group.volume)}</p>
             </div>
-            <ChevronDown className={`h-5 w-5 text-app-muted transition ${open[group.key] ? "rotate-180" : ""}`} />
+            <ChevronDown className={`h-5 w-5 text-app-muted transition ${openDates[group.key] ? "rotate-180" : ""}`} />
           </button>
-          {open[group.key] && (
+          {openDates[group.key] && (
             <div className="space-y-3 border-t border-app-line p-4">
               {group.sessions.map((session) => (
                 <SessionHistoryCard key={session.id} session={session} />
@@ -1056,11 +1068,30 @@ function SettingsSessionAccordion({ routine, state, open, onToggle, onProfile })
   );
 }
 
-function SettingsView({ state, recoveryCode, recoveryInput, setRecoveryInput, onRecover, onProfile, currentRoutine, history, bodyweightLogs, onDeload, onReset, busy }) {
+function SettingsView({
+  state,
+  recoveryCode,
+  recoveryInput,
+  setRecoveryInput,
+  onRecover,
+  onProfile,
+  currentRoutine,
+  history,
+  bodyweightLogs,
+  openSections,
+  setOpenSections,
+  onlyToday,
+  setOnlyToday,
+  onDeload,
+  onReset,
+  busy,
+}) {
   const [copied, setCopied] = useState(false);
-  const [open, setOpen] = useState(() => ({ [ROUTINES[Number(state.currentRoutineIndex || 0)]?.id || "a1"]: true }));
-  const [onlyToday, setOnlyToday] = useState(true);
   const visibleRoutines = onlyToday ? [currentRoutine] : ROUTINES;
+
+  useEffect(() => {
+    setOpenSections((prev) => (Object.keys(prev).length ? prev : { [currentRoutine.id]: true }));
+  }, [currentRoutine.id, setOpenSections]);
 
   async function copyCode() {
     await navigator.clipboard.writeText(recoveryCode);
@@ -1110,8 +1141,8 @@ function SettingsView({ state, recoveryCode, recoveryInput, setRecoveryInput, on
               key={routine.id}
               routine={routine}
               state={state}
-              open={Boolean(open[routine.id])}
-              onToggle={() => setOpen((prev) => ({ ...prev, [routine.id]: !prev[routine.id] }))}
+              open={Boolean(openSections[routine.id])}
+              onToggle={() => setOpenSections((prev) => ({ ...prev, [routine.id]: !prev[routine.id] }))}
               onProfile={onProfile}
             />
           ))}

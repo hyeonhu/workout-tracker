@@ -1,7 +1,7 @@
 {
-  "name": "운동 트래커",
-  "short_name": "운동",
-  "description": "근비대 목표 4분할 운동 기록 앱",
+  "name": "증량일지",
+  "short_name": "증량일지",
+  "description": "근비대 목표 4분할 증량 기록 앱",
   "start_url": "/workout-tracker/",
   "scope": "/workout-tracker/",
   "display": "standalone",

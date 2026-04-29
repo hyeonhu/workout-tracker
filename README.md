@@ -1,6 +1,6 @@
-# 운동 트래커
+# 증량일지
 
-근비대 목표의 4분할 운동 트래커입니다. React, Vite, Tailwind CSS, Firebase Firestore, Anonymous Auth, PWA, GitHub Pages 배포를 기준으로 구성되어 있습니다.
+근비대 목표의 4분할 증량 기록 앱입니다. React, Vite, Tailwind CSS, Firebase Firestore, Anonymous Auth, PWA, GitHub Pages 배포를 기준으로 구성되어 있습니다.
 
 ## 실행
 
