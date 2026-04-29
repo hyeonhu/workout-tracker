@@ -13,7 +13,7 @@ import {
   Settings,
   ShieldCheck,
 } from "lucide-react";
-import { addDoc, collection, deleteDoc, doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
 import { db, ensureAnonymousUser } from "./firebase";
 import {
   CATEGORY_META,
@@ -279,10 +279,10 @@ export default function App() {
 
   async function changeRecoveryCode(nextCode) {
     const code = nextCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
-    if (!code || !user || !ownerUid) return;
+    if (!code || !user || !ownerUid) return false;
     if (code.length < 4 || code.length > 20) {
       setStatus("복구 코드는 4~20자로 입력해줘");
-      return;
+      return false;
     }
     setBusy(true);
     try {
@@ -290,16 +290,35 @@ export default function App() {
       const nextDoc = await getDoc(nextRef);
       if (nextDoc.exists() && nextDoc.data().uid !== ownerUid) {
         setStatus("이미 사용 중인 복구 코드야");
-        return;
+        return false;
       }
-      await setDoc(nextRef, { uid: ownerUid, createdAt: serverTimestamp(), updatedAt: serverTimestamp(), custom: true });
+      await setDoc(
+        nextRef,
+        {
+          uid: ownerUid,
+          createdAt: nextDoc.exists() ? nextDoc.data().createdAt || serverTimestamp() : serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          custom: true,
+          primary: true,
+        },
+        { merge: true }
+      );
       if (recoveryCode && recoveryCode !== code) {
-        await deleteDoc(doc(db, "recoveryCodes", recoveryCode));
+        await setDoc(
+          doc(db, "recoveryCodes", recoveryCode),
+          { uid: ownerUid, updatedAt: serverTimestamp(), primary: false, supersededBy: code },
+          { merge: true }
+        );
       }
       localStorage.setItem("recoveryCode", code);
       setRecoveryCode(code);
       setRecoveryInput("");
       setStatus("복구 코드 변경됨");
+      return true;
+    } catch (error) {
+      console.error(error);
+      setStatus("복구 코드 변경 실패");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -1142,6 +1161,7 @@ function SettingsView({
 }) {
   const [copied, setCopied] = useState(false);
   const [customRecoveryCode, setCustomRecoveryCode] = useState("");
+  const [recoveryEditOpen, setRecoveryEditOpen] = useState(false);
   const visibleRoutines = onlyToday ? [currentRoutine] : ROUTINES;
 
   useEffect(() => {
@@ -1156,49 +1176,6 @@ function SettingsView({
 
   return (
     <section className="space-y-4">
-      <div className="rounded-lg border border-app-line bg-app-card p-4">
-        <div className="flex items-center gap-2">
-          <ShieldCheck className="h-5 w-5 text-app-accent" />
-          <h2 className="font-bold text-white">복구 코드</h2>
-        </div>
-        <p className="mt-2 rounded-md bg-app-bg px-3 py-2 text-sm text-amber-200">홈 화면 앱에서 보이는 이 코드를 따로 저장해두면 브라우저 데이터를 지워도 복구할 수 있어요.</p>
-        <div className="mt-3 flex items-center gap-2">
-          <div className="flex-1 rounded-md bg-app-bg px-3 py-3 text-xl font-black tracking-[0.18em] text-white">{recoveryCode || "생성 중"}</div>
-          <button onClick={copyCode} className="rounded-md bg-app-accent p-3 text-white" title="복사">
-            <Copy className="h-5 w-5" />
-          </button>
-        </div>
-        <p className="mt-2 text-sm text-app-muted">{copied ? "복사됨" : "브라우저 데이터를 지웠을 때 이 코드로 다시 연결합니다."}</p>
-        <div className="mt-4 rounded-md border border-app-line bg-app-bg p-3">
-          <p className="text-sm font-bold text-white">내 복구 코드 직접 설정</p>
-          <p className="mt-1 text-xs text-app-muted">영문과 숫자 4~20자로 설정할 수 있어요. 이미 사용 중인 코드는 사용할 수 없어요.</p>
-          <div className="mt-3 flex gap-2">
-            <input
-              value={customRecoveryCode}
-              onChange={(event) => setCustomRecoveryCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))}
-              placeholder="예: HYEONHU2026"
-              className="min-w-0 flex-1 rounded-md border border-app-line bg-[#0f0f16] px-3 py-3 text-white outline-none focus:border-app-accent"
-            />
-            <button
-              onClick={async () => {
-                await onChangeRecoveryCode(customRecoveryCode);
-                setCustomRecoveryCode("");
-              }}
-              disabled={busy || customRecoveryCode.length < 4}
-              className="rounded-md bg-app-accent px-4 font-bold text-white disabled:opacity-50"
-            >
-              변경
-            </button>
-          </div>
-        </div>
-        <div className="mt-4 flex gap-2">
-          <input value={recoveryInput} onChange={(event) => setRecoveryInput(event.target.value.toUpperCase())} placeholder="복구 코드 입력" className="min-w-0 flex-1 rounded-md border border-app-line bg-app-bg px-3 text-white outline-none focus:border-app-accent" />
-          <button onClick={onRecover} disabled={busy} className="rounded-md border border-app-line px-4 font-bold text-white disabled:opacity-50">
-            연결
-          </button>
-        </div>
-      </div>
-
       <div className="rounded-lg border border-app-line bg-app-card p-4">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -1226,6 +1203,8 @@ function SettingsView({
         </div>
       </div>
 
+      <PlannedSetBalanceCard />
+
       <div className="rounded-lg border border-app-line bg-app-card p-4">
         <h2 className="font-bold text-white">과부하 규칙</h2>
         <p className="mt-2 text-sm leading-6 text-app-muted">
@@ -1242,7 +1221,62 @@ function SettingsView({
         </div>
       </div>
 
-      <PlannedSetBalanceCard />
+      <div className="rounded-lg border border-app-line bg-app-card p-4">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="h-5 w-5 text-app-accent" />
+          <h2 className="font-bold text-white">복구 코드</h2>
+        </div>
+        <p className="mt-2 rounded-md bg-app-bg px-3 py-2 text-sm text-amber-200">브라우저 데이터를 지워도 이 코드로 다시 연결할 수 있어요. 기존 코드를 바꿔도 예전 코드는 내 데이터에 묶여 있어서 다른 사람이 가져갈 수 없어요.</p>
+        <div className="mt-3 flex items-center gap-2">
+          <div className="flex-1 rounded-md bg-app-bg px-3 py-3 text-xl font-black tracking-[0.18em] text-white">{recoveryCode || "생성 중"}</div>
+          <button onClick={copyCode} className="rounded-md bg-app-accent p-3 text-white" title="복사">
+            <Copy className="h-5 w-5" />
+          </button>
+        </div>
+        <p className="mt-2 text-sm text-app-muted">{copied ? "복사됨" : "현재 표시된 코드가 대표 복구 코드입니다."}</p>
+        <button
+          onClick={() => setRecoveryEditOpen((value) => !value)}
+          className="mt-4 flex w-full items-center justify-between rounded-md border border-app-line bg-app-bg px-3 py-3 text-left font-bold text-white"
+        >
+          복구 코드 변경 / 연결
+          <ChevronDown className={`h-5 w-5 text-app-muted transition ${recoveryEditOpen ? "rotate-180" : ""}`} />
+        </button>
+        {recoveryEditOpen && (
+          <div className="mt-3 space-y-3 rounded-md border border-app-line bg-app-bg p-3">
+            <div>
+              <p className="text-sm font-bold text-white">내 복구 코드 직접 설정</p>
+              <p className="mt-1 text-xs text-app-muted">영문과 숫자 4~20자로 설정할 수 있어요. 이미 다른 사람이 쓰는 코드는 사용할 수 없어요.</p>
+              <div className="mt-3 flex gap-2">
+                <input
+                  value={customRecoveryCode}
+                  onChange={(event) => setCustomRecoveryCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))}
+                  placeholder="예: HYEONHU2026"
+                  className="min-w-0 flex-1 rounded-md border border-app-line bg-[#0f0f16] px-3 py-3 text-white outline-none focus:border-app-accent"
+                />
+                <button
+                  onClick={async () => {
+                    const changed = await onChangeRecoveryCode(customRecoveryCode);
+                    if (changed) setCustomRecoveryCode("");
+                  }}
+                  disabled={busy || customRecoveryCode.length < 4}
+                  className="rounded-md bg-app-accent px-4 font-bold text-white disabled:opacity-50"
+                >
+                  변경
+                </button>
+              </div>
+            </div>
+            <div className="border-t border-app-line pt-3">
+              <p className="text-sm font-bold text-white">다른 기기 코드 연결</p>
+              <div className="mt-3 flex gap-2">
+                <input value={recoveryInput} onChange={(event) => setRecoveryInput(event.target.value.toUpperCase())} placeholder="복구 코드 입력" className="min-w-0 flex-1 rounded-md border border-app-line bg-[#0f0f16] px-3 text-white outline-none focus:border-app-accent" />
+                <button onClick={onRecover} disabled={busy} className="rounded-md border border-app-line px-4 font-bold text-white disabled:opacity-50">
+                  연결
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </section>
   );
 }
