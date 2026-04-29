@@ -191,6 +191,7 @@ export function createInitialState() {
     sessionCount: 0,
     profileData: createInitialProfileData(),
     instanceData: createInitialInstanceData(),
+    recommendationCooldowns: {},
     updatedAt: Date.now(),
   };
 }
@@ -205,6 +206,7 @@ export function migrateState(rawState) {
     schemaVersion: 2,
     profileData: { ...base.profileData, ...(rawState.profileData || {}) },
     instanceData: { ...base.instanceData, ...(rawState.instanceData || {}) },
+    recommendationCooldowns: { ...base.recommendationCooldowns, ...(rawState.recommendationCooldowns || {}) },
   };
 
   if (rawState.exerciseData && !rawState.profileData) {

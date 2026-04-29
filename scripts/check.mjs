@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { parse } from "@babel/parser";
-import { bodyweightWeeklyAverage, plateauRecommendations, weeklyMuscleVolume, progressionSeries } from "../src/analytics.js";
+import {
+  adherenceRate,
+  bodyweightWeeklyAverage,
+  plateauRecommendations,
+  weeklyDirectHardSets,
+  weeklyMuscleVolume,
+  progressionSeries,
+} from "../src/analytics.js";
 import { completeSession } from "../src/progression.js";
 import { ROUTINES, createInitialState, migrateState, profileById } from "../src/routines.js";
 
@@ -49,7 +56,16 @@ const history = [
 ];
 assert.equal(weeklyMuscleVolume(history, 2).at(-1).muscles.chest, 1500);
 assert.equal(progressionSeries(history, ["bench_press"])[0].points[0].metricLabel, "e1RM");
-assert.equal(bodyweightWeeklyAverage([{ date: new Date(), value: 80 }, { date: new Date(), value: 81 }], 1)[0].average, 80.5);
+assert.equal(
+  bodyweightWeeklyAverage([
+    { date: new Date(), value: 80, context: "post_workout" },
+    { date: new Date(), value: 81, context: "morning_fasted" },
+  ], 1)[0].average,
+  81
+);
+assert.equal(bodyweightWeeklyAverage([{ date: new Date(), value: 80, context: "post_workout" }], 1)[0].confidence, "fallback");
+assert.equal(weeklyDirectHardSets(history, 1)[0].muscles.chest, 3);
+assert.ok(adherenceRate(history, 4) >= 0);
 assert.ok(Array.isArray(plateauRecommendations(history, [], 4)));
 
 console.log("checks passed");

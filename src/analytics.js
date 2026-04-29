@@ -66,17 +66,24 @@ export function progressionSeries(history, profileIds = ANCHOR_PROFILE_IDS) {
 }
 
 export function bodyweightWeeklyAverage(bodyweightLogs, weeks = 10) {
-  const rows = recentWeekKeys(weeks).map((week) => ({ week, label: weekLabel(week), values: [], average: 0 }));
+  const rows = recentWeekKeys(weeks).map((week) => ({ week, label: weekLabel(week), values: [], morningValues: [], average: 0, confidence: "none" }));
   const byWeek = Object.fromEntries(rows.map((row) => [row.week, row]));
   for (const log of bodyweightLogs || []) {
     const key = weekKey(toDate(log.date || log.createdAt || log.completedAtLocal));
     if (!byWeek[key]) continue;
-    byWeek[key].values.push(Number(log.value || log.bodyweight || 0));
+    const value = Number(log.value || log.bodyweight || 0);
+    if (!value) continue;
+    byWeek[key].values.push(value);
+    if ((log.context || "other") === "morning_fasted") byWeek[key].morningValues.push(value);
   }
-  return rows.map((row) => ({
-    ...row,
-    average: row.values.length ? round(row.values.reduce((acc, value) => acc + value, 0) / row.values.length, 1) : 0,
-  }));
+  return rows.map((row) => {
+    const preferred = row.morningValues.length ? row.morningValues : row.values;
+    return {
+      ...row,
+      average: preferred.length ? round(preferred.reduce((acc, value) => acc + value, 0) / preferred.length, 1) : 0,
+      confidence: row.morningValues.length ? "high" : row.values.length ? "fallback" : "none",
+    };
+  });
 }
 
 export function plannedWeeklySetBalance(routines) {
@@ -84,47 +91,84 @@ export function plannedWeeklySetBalance(routines) {
   for (const routine of routines) {
     for (const exercise of routine.exercises) {
       const profile = profileById(exercise.profileId);
-      for (const [muscleId, factor] of Object.entries(profile.muscleFactors || {})) {
-        if (Number(factor) >= 0.5) muscles[muscleId] += exercise.defaultSets;
-      }
+      for (const muscleId of directMusclesFor(profile.id)) muscles[muscleId] += exercise.defaultSets;
     }
   }
   return muscles;
 }
 
-export function plateauRecommendations(history, bodyweightLogs, weeks = 4) {
-  const completedRecent = history.filter((session) => daysAgo(toDate(session.date)) <= weeks * 7);
-  const completionRate = Math.min(1, completedRecent.length / (weeks * 4));
+export function weeklyDirectHardSets(history, weeks = 4) {
+  const rows = recentWeekKeys(weeks).map((week) => ({
+    week,
+    label: weekLabel(week),
+    muscles: Object.fromEntries(MUSCLE_GROUPS.map((muscle) => [muscle.id, 0])),
+  }));
+  const byWeek = Object.fromEntries(rows.map((row) => [row.week, row]));
+  for (const session of history || []) {
+    const row = byWeek[weekKey(toDate(session.date))];
+    if (!row) continue;
+    for (const exercise of session.exercises || []) {
+      const profileId = normalizeProfileId(exercise);
+      const setCount = Array.isArray(exercise.sets) ? exercise.sets.length : Array.isArray(exercise.reps) ? exercise.reps.length : 0;
+      for (const muscleId of directMusclesFor(profileId)) row.muscles[muscleId] += setCount;
+    }
+  }
+  return rows;
+}
+
+export function adherenceRate(history, weeks = 4) {
+  const recent = (history || []).filter((session) => daysAgo(toDate(session.date)) <= weeks * 7);
+  const completed = recent.filter((session) => {
+    const planned = plannedSetsForSession(session.sessionId, session.routine);
+    const logged = (session.exercises || []).reduce((acc, exercise) => {
+      if (Array.isArray(exercise.sets)) return acc + exercise.sets.length;
+      if (Array.isArray(exercise.reps)) return acc + exercise.reps.length;
+      return acc;
+    }, 0);
+    return planned > 0 && logged >= planned * 0.8;
+  }).length;
+  return Math.min(1, completed / (weeks * 4));
+}
+
+export function plateauRecommendations(history, bodyweightLogs, weeks = 4, cooldowns = {}) {
+  const completionRate = adherenceRate(history, weeks);
   const bw = bodyweightWeeklyAverage(bodyweightLogs, weeks);
   const firstBw = bw.find((row) => row.average > 0)?.average || 0;
   const lastBw = [...bw].reverse().find((row) => row.average > 0)?.average || 0;
   const bodyweightOk = !firstBw || !lastBw || lastBw >= firstBw * 0.995;
+  const bodyweightDropping = firstBw && lastBw && lastBw < firstBw * 0.995;
   const series = progressionSeries(history);
   const plateaued = series.filter((item) => {
     const recent = item.points.filter((point) => daysAgo(point.date) <= weeks * 7);
-    if (recent.length < 2) return false;
+    if (recent.length < 3) return false;
     const first = recent[0].metric || recent[0].weight;
     const last = recent[recent.length - 1].metric || recent[recent.length - 1].weight;
     if (!first) return false;
     return Math.abs((last - first) / first) < 0.02;
   });
   const recommendations = [];
+  const recoveryFlags = recentRecoveryFlags(history, weeks);
+  const adequateAdherence = completionRate >= 0.85;
 
-  if (plateaued.length >= 3 || (plateaued.length >= 2 && !bodyweightOk)) {
-    recommendations.push({
+  if (adequateAdherence && plateaued.length >= 2 && (bodyweightDropping || recoveryFlags.length > 0)) {
+    const rec = {
       type: "global",
+      key: "global_plateau",
       title: "전반적인 정체",
       text: "여러 주요 운동이 같이 정체되어 보여요. 세트 추가보다 디로드 또는 식단/회복 점검이 더 적절할 수 있어요.",
-    });
-    return recommendations;
+    };
+    return isSuppressed(rec.key, cooldowns) ? [] : [rec];
   }
 
-  if (completionRate >= 0.85 && bodyweightOk) {
+  if (adequateAdherence && bodyweightOk) {
     for (const item of plateaued.slice(0, 3)) {
       const profile = profileById(item.profileId);
       const sensitive = profile?.kneeSensitive || profile?.hamstringSensitive;
+      const key = `local_${directMusclesFor(item.profileId)[0] || item.profileId}`;
+      if (isSuppressed(key, cooldowns)) continue;
       recommendations.push({
         type: "local",
+        key,
         title: `${item.name} 정체`,
         text: sensitive
           ? "민감 부위라 세트 추가보다 같은 중량으로 1주 더 관찰하거나 증량을 보류해보세요."
@@ -161,6 +205,60 @@ function normalizeProfileId(exercise) {
     lateral_raise_a2: "lateral_raise",
   };
   return exercise.profileId || exercise.groupId || legacy[exercise.id] || exercise.id;
+}
+
+export function directMusclesFor(profileId) {
+  const map = {
+    bench_press: ["chest"],
+    incline_db_press: ["chest"],
+    incline_bench_press: ["chest"],
+    cable_fly: ["chest"],
+    lat_pulldown: ["back"],
+    neutral_lat_pulldown: ["back"],
+    seated_cable_row: ["back"],
+    chest_supported_row: ["back"],
+    lateral_raise: ["lateral_delts"],
+    face_pull: ["rear_delts"],
+    leg_press: ["quads"],
+    leg_extension: ["quads"],
+    romanian_deadlift: ["hamstrings_glutes"],
+    hip_thrust: ["hamstrings_glutes"],
+    leg_curl: ["hamstrings_glutes"],
+    ez_bar_curl: ["biceps"],
+    hammer_curl: ["biceps"],
+    triceps_pushdown: ["triceps"],
+    overhead_triceps_extension: ["triceps"],
+    cable_crunch: ["core"],
+    reverse_crunch: ["core"],
+    plank: ["core"],
+  };
+  return map[profileId] || [];
+}
+
+function plannedSetsForSession(sessionId, routineName) {
+  const map = {
+    a1: 17,
+    b1: 19,
+    a2: 16,
+    b2: 16,
+    A1: 17,
+    B1: 19,
+    A2: 16,
+    B2: 16,
+  };
+  return map[sessionId] || map[routineName] || 0;
+}
+
+function recentRecoveryFlags(history, weeks) {
+  return (history || []).filter((session) => daysAgo(toDate(session.date)) <= weeks * 7).flatMap((session) =>
+    Object.values(session.recoveryConfirmations || session.kneeConfirmations || {}).filter((item) => item && item.clean === false)
+  );
+}
+
+function isSuppressed(key, cooldowns) {
+  const shownAt = Number(cooldowns?.[key] || 0);
+  if (!shownAt) return false;
+  return Date.now() - shownAt < 14 * 86400000;
 }
 
 export function toDate(value) {

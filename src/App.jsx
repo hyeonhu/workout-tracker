@@ -35,6 +35,7 @@ import {
   progressionSeries,
   sessionVolume,
   toDate,
+  weeklyDirectHardSets,
   weeklyMuscleVolume,
 } from "./analytics";
 import { applyDeload, completeSession, sum } from "./progression";
@@ -55,6 +56,8 @@ export default function App() {
   const [tab, setTab] = useState("today");
   const [entries, setEntries] = useState({});
   const [sessionNotes, setSessionNotes] = useState("");
+  const [sessionBodyweight, setSessionBodyweight] = useState("");
+  const [sessionBodyweightContext, setSessionBodyweightContext] = useState("post_workout");
   const [kneeApprovals, setKneeApprovals] = useState({});
   const [recoveryCode, setRecoveryCode] = useState(() => localStorage.getItem("recoveryCode") || "");
   const [recoveryInput, setRecoveryInput] = useState("");
@@ -157,6 +160,8 @@ export default function App() {
     setEntries(nextEntries);
     setKneeApprovals({});
     setSessionNotes("");
+    setSessionBodyweight("");
+    setSessionBodyweightContext("post_workout");
   }, [appState?.currentRoutineIndex, appState?.sessionCount]);
 
   async function saveState(nextState) {
@@ -193,6 +198,7 @@ export default function App() {
       setStatus(isOnline ? "저장 중" : "오프라인 대기");
       const completedAt = new Date();
       const result = completeSession(appState, routine, entries, kneeApprovals, sessionNotes.trim());
+      if (Number(sessionBodyweight) > 0) await addBodyweight(sessionBodyweight, "", sessionBodyweightContext, completedAt);
       await addDoc(collection(db, "users", ownerUid, "history"), {
         date: serverTimestamp(),
         localDateKey: dateKey(completedAt),
@@ -241,19 +247,33 @@ export default function App() {
     }
   }
 
-  async function addBodyweight(value, note = "") {
+  async function addBodyweight(value, note = "", context = "other", measuredAt = new Date()) {
     const number = Number(value);
     if (!number || !ownerUid) return;
-    const now = new Date();
     setStatus(isOnline ? "저장 중" : "오프라인 대기");
     await addDoc(collection(db, "users", ownerUid, "bodyweight"), {
       value: number,
       note,
-      date: now,
-      localDateKey: dateKey(now),
+      context,
+      date: measuredAt,
+      localDateKey: dateKey(measuredAt),
       createdAt: serverTimestamp(),
     });
     setStatus(isOnline ? "저장됨" : "오프라인 대기");
+  }
+
+  async function saveRecommendationCooldown(key) {
+    if (!key) return;
+    const nextState = {
+      ...appState,
+      recommendationCooldowns: {
+        ...(appState.recommendationCooldowns || {}),
+        [key]: Date.now(),
+      },
+      updatedAt: Date.now(),
+    };
+    setState(nextState);
+    await saveState(nextState);
   }
 
   async function resetAll() {
@@ -307,11 +327,23 @@ export default function App() {
             setKneeApprovals={setKneeApprovals}
             notes={sessionNotes}
             setNotes={setSessionNotes}
+            bodyweight={sessionBodyweight}
+            setBodyweight={setSessionBodyweight}
+            bodyweightContext={sessionBodyweightContext}
+            setBodyweightContext={setSessionBodyweightContext}
             onFinish={finishSession}
             busy={busy}
           />
         )}
-        {tab === "history" && <HistoryView history={history} bodyweightLogs={bodyweightLogs} onBodyweight={addBodyweight} />}
+        {tab === "history" && (
+          <HistoryView
+            history={history}
+            bodyweightLogs={bodyweightLogs}
+            recommendationCooldowns={appState.recommendationCooldowns || {}}
+            onRecommendationCooldown={saveRecommendationCooldown}
+            onBodyweight={addBodyweight}
+          />
+        )}
         {tab === "settings" && (
           <SettingsView
             state={appState}
@@ -423,7 +455,23 @@ function SessionAccordion({ routine, state, open, current, onToggle }) {
   );
 }
 
-function LogView({ state, routine, entries, setEntries, pendingKnee, kneeApprovals, setKneeApprovals, notes, setNotes, onFinish, busy }) {
+function LogView({
+  state,
+  routine,
+  entries,
+  setEntries,
+  pendingKnee,
+  kneeApprovals,
+  setKneeApprovals,
+  notes,
+  setNotes,
+  bodyweight,
+  setBodyweight,
+  bodyweightContext,
+  setBodyweightContext,
+  onFinish,
+  busy,
+}) {
   const summary = sessionDraftSummary(routine, state, entries);
 
   return (
@@ -499,6 +547,30 @@ function LogView({ state, routine, entries, setEntries, pendingKnee, kneeApprova
         className="min-h-24 w-full rounded-lg border border-app-line bg-app-card p-4 text-white outline-none focus:border-app-accent"
       />
 
+      <div className="rounded-lg border border-app-line bg-app-card p-4">
+        <h2 className="font-bold text-white">체중 선택 기록</h2>
+        <p className="mt-1 text-sm text-app-muted">운동 직후 기록이 필요할 때만 입력해도 됩니다.</p>
+        <div className="mt-3 grid grid-cols-[1fr_132px] gap-2">
+          <input
+            type="number"
+            step="0.1"
+            value={bodyweight}
+            onChange={(event) => setBodyweight(event.target.value)}
+            placeholder="kg"
+            className="min-w-0 rounded-md border border-app-line bg-app-bg px-3 text-white outline-none focus:border-app-accent"
+          />
+          <select
+            value={bodyweightContext}
+            onChange={(event) => setBodyweightContext(event.target.value)}
+            className="rounded-md border border-app-line bg-app-bg px-2 text-sm text-white outline-none focus:border-app-accent"
+          >
+            <option value="post_workout">운동 후</option>
+            <option value="morning_fasted">아침 공복</option>
+            <option value="other">기타</option>
+          </select>
+        </div>
+      </div>
+
       <SessionDraftSummary summary={summary} />
 
       <button onClick={onFinish} disabled={busy} className="flex w-full items-center justify-center gap-2 rounded-md bg-app-accent py-4 text-lg font-black text-white disabled:opacity-50">
@@ -552,7 +624,7 @@ function SessionDraftSummary({ summary }) {
   );
 }
 
-function HistoryView({ history, bodyweightLogs, onBodyweight }) {
+function HistoryView({ history, bodyweightLogs, recommendationCooldowns, onRecommendationCooldown, onBodyweight }) {
   const [open, setOpen] = useState({});
   const [showAnalytics, setShowAnalytics] = useState(true);
   const groups = useMemo(() => groupHistoryByDate(history), [history]);
@@ -560,7 +632,13 @@ function HistoryView({ history, bodyweightLogs, onBodyweight }) {
   if (!history.length) {
     return (
       <section className="space-y-4">
-        <AnalyticsDashboard history={history} bodyweightLogs={bodyweightLogs} onBodyweight={onBodyweight} />
+        <AnalyticsDashboard
+          history={history}
+          bodyweightLogs={bodyweightLogs}
+          recommendationCooldowns={recommendationCooldowns}
+          onRecommendationCooldown={onRecommendationCooldown}
+          onBodyweight={onBodyweight}
+        />
         <Empty title="아직 운동 기록이 없어" text="첫 세션을 완료하면 날짜별 히스토리가 쌓입니다." />
       </section>
     );
@@ -578,7 +656,13 @@ function HistoryView({ history, bodyweightLogs, onBodyweight }) {
         </button>
         {showAnalytics && (
           <div className="space-y-4 border-t border-app-line p-4">
-            <AnalyticsDashboard history={history} bodyweightLogs={bodyweightLogs} onBodyweight={onBodyweight} />
+            <AnalyticsDashboard
+              history={history}
+              bodyweightLogs={bodyweightLogs}
+              recommendationCooldowns={recommendationCooldowns}
+              onRecommendationCooldown={onRecommendationCooldown}
+              onBodyweight={onBodyweight}
+            />
           </div>
         )}
       </article>
@@ -604,18 +688,23 @@ function HistoryView({ history, bodyweightLogs, onBodyweight }) {
   );
 }
 
-function AnalyticsDashboard({ history, bodyweightLogs, onBodyweight }) {
+function AnalyticsDashboard({ history, bodyweightLogs, recommendationCooldowns, onRecommendationCooldown, onBodyweight }) {
   const weekly = useMemo(() => weeklyMuscleVolume(history, 10), [history]);
   const progression = useMemo(() => progressionSeries(history), [history]);
   const compliance = useMemo(() => complianceSeries(history, 10), [history]);
   const bodyweight = useMemo(() => bodyweightWeeklyAverage(bodyweightLogs, 10), [bodyweightLogs]);
-  const recommendations = useMemo(() => plateauRecommendations(history, bodyweightLogs, 4), [history, bodyweightLogs]);
+  const directSets = useMemo(() => weeklyDirectHardSets(history, 4), [history]);
+  const recommendations = useMemo(
+    () => plateauRecommendations(history, bodyweightLogs, 4, recommendationCooldowns),
+    [history, bodyweightLogs, recommendationCooldowns]
+  );
   return (
     <div className="space-y-4">
       <ProgressionCharts series={progression} />
       <BodyweightCard rows={bodyweight} logs={bodyweightLogs} onSave={onBodyweight} />
-      <RecommendationCard recommendations={recommendations} />
+      <RecommendationCard recommendations={recommendations} onCooldown={onRecommendationCooldown} />
       <ComplianceChart rows={compliance} />
+      <DirectHardSetsSummary rows={directSets} />
       <AdvancedAnalytics rows={weekly} />
     </div>
   );
@@ -714,6 +803,7 @@ function MiniLineChart({ title, points }) {
 
 function BodyweightCard({ rows, logs, onSave }) {
   const [value, setValue] = useState("");
+  const [context, setContext] = useState("morning_fasted");
   const recent = rows.filter((row) => row.average > 0);
   const latest = logs[0];
   const max = Math.max(...recent.map((row) => row.average), 1);
@@ -721,15 +811,15 @@ function BodyweightCard({ rows, logs, onSave }) {
   const span = Math.max(1, max - min);
 
   async function save() {
-    await onSave(value);
+    await onSave(value, "", context);
     setValue("");
   }
 
   return (
     <section className="rounded-lg border border-app-line bg-app-card p-4">
       <h2 className="font-bold text-white">체중 추세</h2>
-      <p className="mt-1 text-sm text-app-muted">가능하면 매일 입력하고, 차트는 주간 평균으로 봅니다.</p>
-      <div className="mt-4 flex gap-2">
+      <p className="mt-1 text-sm text-app-muted">주간 평균은 아침 공복 값을 우선 사용하고, 없으면 전체 입력값으로 대체합니다.</p>
+      <div className="mt-4 grid grid-cols-[1fr_132px_64px] gap-2">
         <input
           type="number"
           step="0.1"
@@ -738,6 +828,15 @@ function BodyweightCard({ rows, logs, onSave }) {
           placeholder={latest ? `최근 ${latest.value}kg` : "체중 kg"}
           className="min-w-0 flex-1 rounded-md border border-app-line bg-app-bg px-3 text-white outline-none focus:border-app-accent"
         />
+        <select
+          value={context}
+          onChange={(event) => setContext(event.target.value)}
+          className="rounded-md border border-app-line bg-app-bg px-2 text-sm text-white outline-none focus:border-app-accent"
+        >
+          <option value="morning_fasted">아침 공복</option>
+          <option value="post_workout">운동 후</option>
+          <option value="other">기타</option>
+        </select>
         <button onClick={save} className="rounded-md bg-app-accent px-4 py-3 font-bold text-white">저장</button>
       </div>
       <div className="mt-4 flex h-20 items-end gap-2">
@@ -747,15 +846,18 @@ function BodyweightCard({ rows, logs, onSave }) {
               className={`w-full rounded-sm ${row.average ? "bg-emerald-500" : "bg-app-bg"}`}
               style={{ height: `${row.average ? Math.max(4, ((row.average - min) / span) * 56 + 4) : 4}px` }}
             />
-            <span className="text-[10px] text-app-muted">{row.average || "-"}</span>
+            <span className={`text-[10px] ${row.confidence === "fallback" ? "text-amber-200" : "text-app-muted"}`}>
+              {row.average ? `${row.average}${row.confidence === "fallback" ? "*" : ""}` : "-"}
+            </span>
           </div>
         ))}
       </div>
+      <p className="mt-2 text-xs text-app-muted">* 표시는 해당 주에 아침 공복 기록이 없어 전체 입력값으로 계산한 낮은 신뢰 평균입니다.</p>
     </section>
   );
 }
 
-function RecommendationCard({ recommendations }) {
+function RecommendationCard({ recommendations, onCooldown }) {
   return (
     <section className="rounded-lg border border-app-line bg-app-card p-4">
       <h2 className="font-bold text-white">정체 추천</h2>
@@ -765,12 +867,28 @@ function RecommendationCard({ recommendations }) {
             <div key={`${item.type}-${index}`} className="rounded-md bg-app-bg p-3">
               <p className="font-bold text-white">{item.title}</p>
               <p className="mt-1 text-sm text-app-muted">{item.text}</p>
+              <button onClick={() => onCooldown(item.key)} className="mt-2 rounded-md border border-app-line px-3 py-2 text-xs font-bold text-app-muted">
+                2주간 숨김
+              </button>
             </div>
           ))}
         </div>
       ) : (
         <p className="mt-2 text-sm text-app-muted">아직 정체 추천을 낼 만큼 기록이 충분하지 않거나, 진행이 정상 범위입니다.</p>
       )}
+    </section>
+  );
+}
+
+function DirectHardSetsSummary({ rows }) {
+  const latest = rows[rows.length - 1];
+  if (!latest) return null;
+  const total = Object.values(latest.muscles).reduce((acc, value) => acc + value, 0);
+  return (
+    <section className="rounded-lg border border-app-line bg-app-card p-4">
+      <h2 className="font-bold text-white">직접 하드세트</h2>
+      <p className="mt-1 text-sm text-app-muted">추천 엔진 내부 기준입니다. 워밍업과 간접 보조 기여는 제외합니다.</p>
+      <p className="mt-3 text-2xl font-black text-white">{total}세트</p>
     </section>
   );
 }
