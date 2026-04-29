@@ -59,6 +59,7 @@ export default function App() {
   const [sessionBodyweight, setSessionBodyweight] = useState("");
   const [sessionBodyweightContext, setSessionBodyweightContext] = useState("post_workout");
   const [kneeApprovals, setKneeApprovals] = useState({});
+  const [logFocusExerciseId, setLogFocusExerciseId] = useState("");
   const [recoveryCode, setRecoveryCode] = useState(() => localStorage.getItem("recoveryCode") || "");
   const [recoveryInput, setRecoveryInput] = useState("");
   const [status, setStatus] = useState("준비 중");
@@ -315,7 +316,17 @@ export default function App() {
       </header>
 
       <main className="mx-auto min-h-[calc(100vh-160px)] w-full max-w-[480px] px-4 pb-28 pt-4">
-        {tab === "today" && <TodayView state={appState} currentRoutine={routine} onLog={() => setTab("log")} onSettings={() => setTab("settings")} />}
+        {tab === "today" && (
+          <TodayView
+            state={appState}
+            currentRoutine={routine}
+            onLog={(exerciseId = "") => {
+              setLogFocusExerciseId(exerciseId);
+              setTab("log");
+            }}
+            onSettings={() => setTab("settings")}
+          />
+        )}
         {tab === "log" && (
           <LogView
             state={appState}
@@ -331,6 +342,8 @@ export default function App() {
             setBodyweight={setSessionBodyweight}
             bodyweightContext={sessionBodyweightContext}
             setBodyweightContext={setSessionBodyweightContext}
+            focusExerciseId={logFocusExerciseId}
+            onFocusHandled={() => setLogFocusExerciseId("")}
             onFinish={finishSession}
             busy={busy}
           />
@@ -417,13 +430,14 @@ function TodayView({ state, currentRoutine, onLog, onSettings }) {
           open={Boolean(open[routine.id])}
           current={routine.id === currentRoutine.id}
           onToggle={() => setOpen((prev) => ({ ...prev, [routine.id]: !prev[routine.id] }))}
+          onExerciseTap={(exerciseId) => onLog(exerciseId)}
         />
       ))}
     </section>
   );
 }
 
-function SessionAccordion({ routine, state, open, current, onToggle }) {
+function SessionAccordion({ routine, state, open, current, onToggle, onExerciseTap }) {
   const summary = sessionSummary(routine);
   return (
     <article className={`overflow-hidden rounded-lg border bg-app-card transition ${current ? "border-app-accent" : "border-app-line"}`}>
@@ -447,7 +461,9 @@ function SessionAccordion({ routine, state, open, current, onToggle }) {
       {open && (
         <div className="space-y-3 border-t border-app-line p-4">
           {routine.exercises.map((exercise) => (
-            <ExerciseCard key={exercise.id} exercise={exercise} view={instanceView(exercise, state)} />
+            <button key={exercise.id} onClick={() => onExerciseTap(exercise.id)} className="block w-full text-left">
+              <ExerciseCard exercise={exercise} view={instanceView(exercise, state)} />
+            </button>
           ))}
         </div>
       )}
@@ -469,10 +485,21 @@ function LogView({
   setBodyweight,
   bodyweightContext,
   setBodyweightContext,
+  focusExerciseId,
+  onFocusHandled,
   onFinish,
   busy,
 }) {
   const summary = sessionDraftSummary(routine, state, entries);
+
+  useEffect(() => {
+    if (!focusExerciseId) return;
+    const frame = requestAnimationFrame(() => {
+      document.getElementById(`log-${focusExerciseId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      onFocusHandled();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusExerciseId, onFocusHandled]);
 
   return (
     <section className="space-y-4">
@@ -508,7 +535,8 @@ function LogView({
         const view = instanceView(exercise, state);
         const reps = entries[exercise.id] || [];
         return (
-          <ExerciseLogCard key={exercise.id} exercise={exercise} view={view}>
+          <div key={exercise.id} id={`log-${exercise.id}`} className="scroll-mt-24">
+          <ExerciseLogCard exercise={exercise} view={view}>
             <div className="mt-3 flex items-center justify-between text-sm">
               <span className="text-app-muted">{formatWeight(view.weight, view)}</span>
               <span className="font-bold text-white">총 {sum(reps)} {view.isTime ? "초" : "회"}</span>
@@ -537,6 +565,7 @@ function LogView({
               ))}
             </div>
           </ExerciseLogCard>
+          </div>
         );
       })}
 

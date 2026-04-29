@@ -1,4 +1,4 @@
-const CACHE_NAME = "workout-tracker-v8";
+const CACHE_NAME = "workout-tracker-v9";
 const APP_SHELL = [
   "/workout-tracker/",
   "/workout-tracker/manifest.json",
