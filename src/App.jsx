@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   ChevronDown,
@@ -13,7 +13,7 @@ import {
   Settings,
   ShieldCheck,
 } from "lucide-react";
-import { addDoc, collection, doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
+import { addDoc, collection, deleteDoc, doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
 import { db, ensureAnonymousUser } from "./firebase";
 import {
   CATEGORY_META,
@@ -70,6 +70,30 @@ export default function App() {
   const [historyAnalyticsOpen, setHistoryAnalyticsOpen] = useState(true);
   const [settingsOpenSections, setSettingsOpenSections] = useState({});
   const [settingsOnlyToday, setSettingsOnlyToday] = useState(true);
+  const scrollPositionsRef = useRef({});
+  const previousTabRef = useRef(tab);
+  const skipScrollRestoreRef = useRef(false);
+
+  function changeTab(nextTab, options = {}) {
+    if (typeof window !== "undefined") {
+      scrollPositionsRef.current[previousTabRef.current] = window.scrollY;
+    }
+    previousTabRef.current = nextTab;
+    skipScrollRestoreRef.current = options.restoreScroll === false;
+    setTab(nextTab);
+  }
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    if (skipScrollRestoreRef.current) {
+      skipScrollRestoreRef.current = false;
+      return undefined;
+    }
+    const frame = requestAnimationFrame(() => {
+      window.scrollTo({ top: scrollPositionsRef.current[tab] || 0, behavior: "auto" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [tab]);
 
   useEffect(() => {
     const unsubscribe = ensureAnonymousUser(async (nextUser) => {
@@ -198,7 +222,7 @@ export default function App() {
     try {
       if (pendingKnee.some((exercise) => kneeApprovals[exercise.id] === undefined)) {
         setStatus("무릎 체크를 먼저 선택해줘");
-        setTab("log");
+        changeTab("log");
         return;
       }
       setStatus(isOnline ? "저장 중" : "오프라인 대기");
@@ -219,7 +243,7 @@ export default function App() {
         exercises: result.historyExercises,
       });
       await saveState(result.nextState);
-      setTab("today");
+      changeTab("today");
       setStatus("세션 완료");
     } finally {
       setBusy(false);
@@ -248,6 +272,34 @@ export default function App() {
       setRecoveryCode(code);
       setRecoveryInput("");
       setStatus("복구 연결됨");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function changeRecoveryCode(nextCode) {
+    const code = nextCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!code || !user || !ownerUid) return;
+    if (code.length < 4 || code.length > 20) {
+      setStatus("복구 코드는 4~20자로 입력해줘");
+      return;
+    }
+    setBusy(true);
+    try {
+      const nextRef = doc(db, "recoveryCodes", code);
+      const nextDoc = await getDoc(nextRef);
+      if (nextDoc.exists() && nextDoc.data().uid !== ownerUid) {
+        setStatus("이미 사용 중인 복구 코드야");
+        return;
+      }
+      await setDoc(nextRef, { uid: ownerUid, createdAt: serverTimestamp(), updatedAt: serverTimestamp(), custom: true });
+      if (recoveryCode && recoveryCode !== code) {
+        await deleteDoc(doc(db, "recoveryCodes", recoveryCode));
+      }
+      localStorage.setItem("recoveryCode", code);
+      setRecoveryCode(code);
+      setRecoveryInput("");
+      setStatus("복구 코드 변경됨");
     } finally {
       setBusy(false);
     }
@@ -329,9 +381,9 @@ export default function App() {
             setOpenSections={setTodayOpenSections}
             onLog={(exerciseId = "") => {
               setLogFocusExerciseId(exerciseId);
-              setTab("log");
+              changeTab("log", { restoreScroll: !exerciseId });
             }}
-            onSettings={() => setTab("settings")}
+            onSettings={() => changeTab("settings")}
           />
         )}
         {tab === "log" && (
@@ -375,6 +427,7 @@ export default function App() {
             recoveryInput={recoveryInput}
             setRecoveryInput={setRecoveryInput}
             onRecover={recover}
+            onChangeRecoveryCode={changeRecoveryCode}
             onProfile={updateProfile}
             currentRoutine={routine}
             history={history}
@@ -398,7 +451,7 @@ export default function App() {
             return (
               <button
                 key={item.id}
-                onClick={() => setTab(item.id)}
+                onClick={() => changeTab(item.id)}
                 className={`flex h-14 flex-col items-center justify-center gap-1 rounded-md text-xs transition ${active ? "bg-app-accent text-white" : "text-app-muted"}`}
               >
                 <Icon className="h-5 w-5" />
@@ -1074,6 +1127,7 @@ function SettingsView({
   recoveryInput,
   setRecoveryInput,
   onRecover,
+  onChangeRecoveryCode,
   onProfile,
   currentRoutine,
   history,
@@ -1087,6 +1141,7 @@ function SettingsView({
   busy,
 }) {
   const [copied, setCopied] = useState(false);
+  const [customRecoveryCode, setCustomRecoveryCode] = useState("");
   const visibleRoutines = onlyToday ? [currentRoutine] : ROUTINES;
 
   useEffect(() => {
@@ -1114,6 +1169,28 @@ function SettingsView({
           </button>
         </div>
         <p className="mt-2 text-sm text-app-muted">{copied ? "복사됨" : "브라우저 데이터를 지웠을 때 이 코드로 다시 연결합니다."}</p>
+        <div className="mt-4 rounded-md border border-app-line bg-app-bg p-3">
+          <p className="text-sm font-bold text-white">내 복구 코드 직접 설정</p>
+          <p className="mt-1 text-xs text-app-muted">영문과 숫자 4~20자로 설정할 수 있어요. 이미 사용 중인 코드는 사용할 수 없어요.</p>
+          <div className="mt-3 flex gap-2">
+            <input
+              value={customRecoveryCode}
+              onChange={(event) => setCustomRecoveryCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))}
+              placeholder="예: HYEONHU2026"
+              className="min-w-0 flex-1 rounded-md border border-app-line bg-[#0f0f16] px-3 py-3 text-white outline-none focus:border-app-accent"
+            />
+            <button
+              onClick={async () => {
+                await onChangeRecoveryCode(customRecoveryCode);
+                setCustomRecoveryCode("");
+              }}
+              disabled={busy || customRecoveryCode.length < 4}
+              className="rounded-md bg-app-accent px-4 font-bold text-white disabled:opacity-50"
+            >
+              변경
+            </button>
+          </div>
+        </div>
         <div className="mt-4 flex gap-2">
           <input value={recoveryInput} onChange={(event) => setRecoveryInput(event.target.value.toUpperCase())} placeholder="복구 코드 입력" className="min-w-0 flex-1 rounded-md border border-app-line bg-app-bg px-3 text-white outline-none focus:border-app-accent" />
           <button onClick={onRecover} disabled={busy} className="rounded-md border border-app-line px-4 font-bold text-white disabled:opacity-50">
