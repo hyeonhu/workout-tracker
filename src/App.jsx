@@ -303,13 +303,6 @@ export default function App() {
         },
         { merge: true }
       );
-      if (recoveryCode && recoveryCode !== code) {
-        await setDoc(
-          doc(db, "recoveryCodes", recoveryCode),
-          { uid: ownerUid, updatedAt: serverTimestamp(), primary: false, supersededBy: code },
-          { merge: true }
-        );
-      }
       localStorage.setItem("recoveryCode", code);
       setRecoveryCode(code);
       setRecoveryInput("");
@@ -317,7 +310,7 @@ export default function App() {
       return true;
     } catch (error) {
       console.error(error);
-      setStatus("복구 코드 변경 실패");
+      setStatus(`복구 코드 변경 실패: ${error?.code || "알 수 없음"}`);
       return false;
     } finally {
       setBusy(false);
