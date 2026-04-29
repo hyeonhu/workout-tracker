@@ -1337,15 +1337,15 @@ function RepInput({ value, min, max, unit, onChange }) {
   const number = Number(value || 0);
   const tone = number >= max ? "border-emerald-500 text-emerald-200" : number < min ? "border-red-500 text-red-200" : "border-app-line text-white";
   return (
-    <div className="grid grid-cols-[44px_1fr_44px] items-center gap-2">
-      <button onClick={() => onChange(Math.max(0, number - 1))} className="flex h-11 items-center justify-center rounded-md bg-app-bg text-white">
+    <div className="grid w-full min-w-0 grid-cols-[52px_minmax(88px,112px)_52px] justify-center gap-2">
+      <button type="button" onClick={() => onChange(Math.max(0, number - 1))} className="flex h-12 w-[52px] items-center justify-center rounded-md bg-app-bg text-white">
         <Minus className="h-5 w-5" />
       </button>
-      <div className={`flex h-11 items-center rounded-md border bg-app-bg ${tone}`}>
-        <input type="number" value={value} onChange={(event) => onChange(Number(event.target.value || 0))} className="min-w-0 flex-1 bg-transparent px-3 text-center font-bold outline-none" />
-        <span className="pr-3 text-sm text-app-muted">{unit}</span>
+      <div className={`flex h-12 min-w-0 items-center rounded-md border bg-app-bg ${tone}`}>
+        <input type="number" value={value} onChange={(event) => onChange(Number(event.target.value || 0))} className="min-w-0 flex-1 bg-transparent px-2 text-center font-bold outline-none" />
+        <span className="shrink-0 pr-2 text-xs text-app-muted">{unit}</span>
       </div>
-      <button onClick={() => onChange(number + 1)} className="flex h-11 items-center justify-center rounded-md bg-app-bg text-white">
+      <button type="button" onClick={() => onChange(number + 1)} className="flex h-12 w-[52px] items-center justify-center rounded-md bg-app-bg text-white">
         <Plus className="h-5 w-5" />
       </button>
     </div>
