@@ -1235,6 +1235,7 @@ function SettingsView({
         </div>
         <p className="mt-2 text-sm text-app-muted">{copied ? "복사됨" : "현재 표시된 코드가 대표 복구 코드입니다."}</p>
         <button
+          type="button"
           onClick={() => setRecoveryEditOpen((value) => !value)}
           className="mt-4 flex w-full items-center justify-between rounded-md border border-app-line bg-app-bg px-3 py-3 text-left font-bold text-white"
         >
@@ -1243,33 +1244,34 @@ function SettingsView({
         </button>
         {recoveryEditOpen && (
           <div className="mt-3 space-y-3 rounded-md border border-app-line bg-app-bg p-3">
-            <div>
+            <div className="rounded-md border border-app-line bg-[#0f0f16] p-3">
               <p className="text-sm font-bold text-white">내 복구 코드 직접 설정</p>
               <p className="mt-1 text-xs text-app-muted">영문과 숫자 4~20자로 설정할 수 있어요. 이미 다른 사람이 쓰는 코드는 사용할 수 없어요.</p>
-              <div className="mt-3 flex gap-2">
+              <div className="mt-3 space-y-2">
                 <input
                   value={customRecoveryCode}
                   onChange={(event) => setCustomRecoveryCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))}
                   placeholder="예: HYEONHU2026"
-                  className="min-w-0 flex-1 rounded-md border border-app-line bg-[#0f0f16] px-3 py-3 text-white outline-none focus:border-app-accent"
+                  className="h-12 w-full rounded-md border border-app-line bg-app-bg px-3 text-white outline-none focus:border-app-accent"
                 />
                 <button
+                  type="button"
                   onClick={async () => {
                     const changed = await onChangeRecoveryCode(customRecoveryCode);
                     if (changed) setCustomRecoveryCode("");
                   }}
                   disabled={busy || customRecoveryCode.length < 4}
-                  className="rounded-md bg-app-accent px-4 font-bold text-white disabled:opacity-50"
+                  className="h-12 w-full rounded-md bg-app-accent px-4 font-bold text-white disabled:opacity-50"
                 >
                   변경
                 </button>
               </div>
             </div>
-            <div className="border-t border-app-line pt-3">
+            <div className="rounded-md border border-app-line bg-[#0f0f16] p-3">
               <p className="text-sm font-bold text-white">다른 기기 코드 연결</p>
-              <div className="mt-3 flex gap-2">
-                <input value={recoveryInput} onChange={(event) => setRecoveryInput(event.target.value.toUpperCase())} placeholder="복구 코드 입력" className="min-w-0 flex-1 rounded-md border border-app-line bg-[#0f0f16] px-3 text-white outline-none focus:border-app-accent" />
-                <button onClick={onRecover} disabled={busy} className="rounded-md border border-app-line px-4 font-bold text-white disabled:opacity-50">
+              <div className="mt-3 space-y-2">
+                <input value={recoveryInput} onChange={(event) => setRecoveryInput(event.target.value.toUpperCase())} placeholder="복구 코드 입력" className="h-12 w-full rounded-md border border-app-line bg-app-bg px-3 text-white outline-none focus:border-app-accent" />
+                <button type="button" onClick={onRecover} disabled={busy} className="h-12 w-full rounded-md border border-app-line px-4 font-bold text-white disabled:opacity-50">
                   연결
                 </button>
               </div>

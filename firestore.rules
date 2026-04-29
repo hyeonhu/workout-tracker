@@ -22,7 +22,7 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create, update: if signedIn()
         && request.resource.data.uid is string
-        && request.resource.data.uid == request.auth.uid;
+        && (request.resource.data.uid == request.auth.uid || hasRecoveredAccess(request.resource.data.uid));
     }
 
     match /userAccess/{userId}/uids/{uid} {
