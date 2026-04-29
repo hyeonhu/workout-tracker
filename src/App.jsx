@@ -165,9 +165,13 @@ export default function App() {
         return;
       }
       setStatus(isOnline ? "저장 중" : "오프라인 대기");
+      const completedAt = new Date();
       const result = completeSession(appState, routine, entries, kneeApprovals, sessionNotes.trim());
       await addDoc(collection(db, "users", ownerUid, "history"), {
         date: serverTimestamp(),
+        localDateKey: dateKey(completedAt),
+        localDateLabel: formatDateOnly(completedAt),
+        completedAtLocal: completedAt.toISOString(),
         sessionId: routine.id,
         routine: routine.name,
         routineTitle: routine.title,
@@ -504,7 +508,7 @@ function SessionDraftSummary({ summary }) {
 
 function HistoryView({ history }) {
   const [open, setOpen] = useState({});
-  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(true);
   const groups = useMemo(() => groupHistoryByDate(history), [history]);
 
   if (!history.length) return <Empty title="아직 기록이 없어" text="첫 세션을 완료하면 여기에 쌓입니다." />;
@@ -566,7 +570,7 @@ function WeeklyMuscleVolumeChart({ rows }) {
   return (
     <section className="rounded-lg border border-app-line bg-app-card p-4">
       <h2 className="font-bold text-white">주간 근육군 볼륨</h2>
-      <p className="mt-1 text-sm text-app-muted">최근 10주, 균형과 급증 여부 확인용</p>
+      <p className="mt-1 text-sm text-app-muted">최근 10주. 같은 주의 운동은 주 시작일 막대 하나에 합산됩니다.</p>
       <div className="mt-4 space-y-2">
         {MUSCLE_GROUPS.map((muscle) => {
           const value = latest?.muscles[muscle.id] || 0;
@@ -925,8 +929,8 @@ function Shell({ children }) {
 function groupHistoryByDate(history) {
   const groups = new Map();
   for (const session of history) {
-    const key = dateKey(session.date);
-    if (!groups.has(key)) groups.set(key, { key, label: formatDateOnly(session.date), sessions: [], volume: 0 });
+    const key = session.localDateKey || dateKey(session.date);
+    if (!groups.has(key)) groups.set(key, { key, label: session.localDateLabel || formatDateOnly(session.date), sessions: [], volume: 0 });
     const group = groups.get(key);
     group.sessions.push(session);
     group.volume += sessionVolume(session);

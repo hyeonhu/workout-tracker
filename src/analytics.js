@@ -115,7 +115,7 @@ function startOfWeek(date) {
 
 function weekLabel(key) {
   const date = new Date(`${key}T00:00:00`);
-  return `${date.getMonth() + 1}/${date.getDate()}`;
+  return `${date.getMonth() + 1}/${date.getDate()} 주`;
 }
 
 function shortDate(date) {
