@@ -2,6 +2,7 @@ export const CATEGORY_META = {
   upper_main: { label: "상체 메인", color: "#3b82f6" },
   posterior: { label: "후면사슬", color: "#a855f7" },
   knee_sensitive: { label: "무릎 주의", color: "#f59e0b" },
+  hamstring_sensitive: { label: "햄스트링 주의", color: "#fb7185" },
   isolation: { label: "고립", color: "#10b981" },
 };
 
@@ -53,9 +54,9 @@ export const EXERCISE_PROFILES = {
     biceps: 0.3,
     rear_delts: 0.25,
   }),
-  leg_curl: profile("leg_curl", "레그컬", "isolation", "machine", 2.5, 0, {
+  leg_curl: profile("leg_curl", "레그컬", "hamstring_sensitive", "machine", 2.5, 0, {
     hamstrings_glutes: 1,
-  }),
+  }, { hamstringSensitive: true }),
   triceps_pushdown: profile("triceps_pushdown", "트라이셉스 푸쉬다운", "isolation", "machine", 2.5, 0, {
     triceps: 1,
   }),
@@ -162,6 +163,8 @@ export function createInitialProfileData() {
         incrementStep: profileItem.defaultIncrement,
         initialized: profileItem.defaultWeight > 0 || profileItem.isTime,
         kneeCheckPending: false,
+        hamstringCheckPending: false,
+        recoveryCheckPending: false,
       },
     ])
   );
@@ -221,8 +224,20 @@ export function migrateState(rawState) {
         incrementStep: Number(old.incrementStep ?? migrated.profileData[exercise.profileId].incrementStep ?? defaultIncrementFor(profileById(exercise.profileId))),
         initialized: Boolean(old.initialized || migrated.profileData[exercise.profileId].initialized),
         kneeCheckPending: Boolean(old.kneeCheckPending || migrated.profileData[exercise.profileId].kneeCheckPending),
+        recoveryCheckPending: Boolean(old.kneeCheckPending || migrated.profileData[exercise.profileId].recoveryCheckPending),
       };
     }
+  }
+
+  for (const profileItem of PROFILE_LIST) {
+    const current = migrated.profileData[profileItem.id] || {};
+    migrated.profileData[profileItem.id] = {
+      ...base.profileData[profileItem.id],
+      ...current,
+      recoveryCheckPending: Boolean(current.recoveryCheckPending || current.kneeCheckPending || current.hamstringCheckPending),
+      kneeCheckPending: Boolean(current.kneeCheckPending),
+      hamstringCheckPending: Boolean(current.hamstringCheckPending),
+    };
   }
 
   return migrated;
@@ -253,7 +268,8 @@ export function instanceView(exercise, state) {
 export function sessionSummary(routine) {
   const totalSets = routine.exercises.reduce((acc, exercise) => acc + exercise.defaultSets, 0);
   const hasKneeSensitive = routine.exercises.some((exercise) => profileById(exercise.profileId).kneeSensitive);
-  return { totalSets, hasKneeSensitive, exerciseCount: routine.exercises.length };
+  const hasHamstringSensitive = routine.exercises.some((exercise) => profileById(exercise.profileId).hamstringSensitive);
+  return { totalSets, hasKneeSensitive, hasHamstringSensitive, exerciseCount: routine.exercises.length };
 }
 
 export function defaultIncrementFor(profileItem) {
@@ -279,6 +295,7 @@ function profile(id, name, category, equipment, defaultIncrement, defaultWeight,
     defaultWeight,
     muscleFactors,
     kneeSensitive: Boolean(options.kneeSensitive),
+    hamstringSensitive: Boolean(options.hamstringSensitive),
     isTime: Boolean(options.isTime),
     displayNote: options.displayNote || "",
   };

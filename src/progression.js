@@ -11,7 +11,7 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
   const state = migrateState(rawState);
   const profileData = { ...createInitialProfileData(), ...(state.profileData || {}) };
   const instanceData = { ...createInitialInstanceData(), ...(state.instanceData || {}) };
-  const kneeConfirmations = {};
+  const recoveryConfirmations = {};
   const historyExercises = [];
 
   for (const exercise of routine.exercises) {
@@ -22,6 +22,8 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
       incrementStep: Number(profileData[profile.id]?.incrementStep || profile.defaultIncrement || 0),
       initialized: Boolean(profileData[profile.id]?.initialized || profile.isTime),
       kneeCheckPending: Boolean(profileData[profile.id]?.kneeCheckPending),
+      hamstringCheckPending: Boolean(profileData[profile.id]?.hamstringCheckPending),
+      recoveryCheckPending: Boolean(profileData[profile.id]?.recoveryCheckPending || profileData[profile.id]?.kneeCheckPending || profileData[profile.id]?.hamstringCheckPending),
     };
     let instanceState = {
       ...instanceData[exercise.id],
@@ -31,8 +33,11 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
       currentSets: Number(instanceData[exercise.id]?.currentSets || exercise.defaultSets),
     };
 
-    if (exercise.anchorSession && profileState.kneeCheckPending && kneeApprovals[exercise.id] !== undefined) {
-      kneeConfirmations[exercise.id] = Boolean(kneeApprovals[exercise.id]);
+    if (exercise.anchorSession && profileState.recoveryCheckPending && kneeApprovals[exercise.id] !== undefined) {
+      recoveryConfirmations[exercise.id] = {
+        clean: Boolean(kneeApprovals[exercise.id]),
+        type: profile.kneeSensitive ? "knee" : profile.hamstringSensitive ? "hamstring" : "general",
+      };
       if (kneeApprovals[exercise.id] === true) {
         profileState.weight = roundWeight(profileState.weight + incrementFor(profileState));
         instanceState.lastReps = Array(instanceState.currentSets).fill(exercise.min);
@@ -40,6 +45,8 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
         instanceState.stagnationCount = 0;
       }
       profileState.kneeCheckPending = false;
+      profileState.hamstringCheckPending = false;
+      profileState.recoveryCheckPending = false;
     }
 
     const reps = entries[exercise.id] || [];
@@ -61,12 +68,15 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
       sets: reps.map((rep, index) => ({ set: index + 1, reps: Number(rep || 0), weight: Number(profileState.weight || 0) })),
       muscleFactors: profile.muscleFactors,
       kneeSensitive: profile.kneeSensitive,
+      hamstringSensitive: profile.hamstringSensitive,
       anchorSession: exercise.anchorSession,
     });
 
     if (allAtTop && profileState.initialized) {
-      if (profile.kneeSensitive && exercise.anchorSession) {
-        profileState.kneeCheckPending = true;
+      if ((profile.kneeSensitive || profile.hamstringSensitive) && exercise.anchorSession) {
+        profileState.kneeCheckPending = Boolean(profile.kneeSensitive);
+        profileState.hamstringCheckPending = Boolean(profile.hamstringSensitive);
+        profileState.recoveryCheckPending = true;
         instanceState.lastReps = reps;
         instanceState.targetTotal = totalReps + 1;
         instanceState.stagnationCount = 0;
@@ -87,13 +97,13 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
       instanceState.stagnationCount = improved ? 0 : instanceState.stagnationCount + 1;
 
       if (instanceState.stagnationCount >= 3) {
-        if (profile.kneeSensitive) {
+        if (profile.kneeSensitive || profile.hamstringSensitive) {
           if (exercise.anchorSession && canChangeLoad) {
             profileState.weight = Math.max(0, roundWeight(profileState.weight - incrementFor(profileState)));
           }
           instanceState.currentSets = exercise.defaultSets;
           instanceState.stagnationCount = 0;
-        } else if (profile.category === "upper_main" || profile.category === "posterior") {
+        } else if (profile.category === "upper_main") {
           if (!wasExtraSet) {
             instanceState.currentSets = exercise.defaultSets + 1;
           } else {
@@ -128,7 +138,7 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
     nextState.lastDeloadAt = Date.now();
   }
 
-  return { nextState, historyExercises, kneeConfirmations, notes };
+  return { nextState, historyExercises, kneeConfirmations: recoveryConfirmations, recoveryConfirmations, notes };
 }
 
 export function applyDeload(rawState) {

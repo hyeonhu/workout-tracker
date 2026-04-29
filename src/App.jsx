@@ -26,7 +26,17 @@ import {
   sessionSummary,
   weightBasisLabel,
 } from "./routines";
-import { complianceSeries, dateKey, progressionSeries, sessionVolume, toDate, weeklyMuscleVolume } from "./analytics";
+import {
+  bodyweightWeeklyAverage,
+  complianceSeries,
+  dateKey,
+  plateauRecommendations,
+  plannedWeeklySetBalance,
+  progressionSeries,
+  sessionVolume,
+  toDate,
+  weeklyMuscleVolume,
+} from "./analytics";
 import { applyDeload, completeSession, sum } from "./progression";
 
 const tabs = [
@@ -41,6 +51,7 @@ export default function App() {
   const [ownerUid, setOwnerUid] = useState(() => localStorage.getItem("ownerUid") || "");
   const [state, setState] = useState(null);
   const [history, setHistory] = useState([]);
+  const [bodyweightLogs, setBodyweightLogs] = useState([]);
   const [tab, setTab] = useState("today");
   const [entries, setEntries] = useState({});
   const [sessionNotes, setSessionNotes] = useState("");
@@ -82,6 +93,17 @@ export default function App() {
 
   useEffect(() => {
     if (!user || !ownerUid) return undefined;
+    return onSnapshot(collection(db, "users", ownerUid, "bodyweight"), (snapshot) => {
+      const rows = snapshot.docs
+        .map((weightDoc) => ({ id: weightDoc.id, ...weightDoc.data() }))
+        .sort((a, b) => toDate(b.date || b.createdAt) - toDate(a.date || a.createdAt))
+        .slice(0, 180);
+      setBodyweightLogs(rows);
+    });
+  }, [user, ownerUid]);
+
+  useEffect(() => {
+    if (!user || !ownerUid) return undefined;
     return onSnapshot(collection(db, "users", ownerUid, "history"), (snapshot) => {
       const rows = snapshot.docs
         .map((historyDoc) => ({ id: historyDoc.id, ...historyDoc.data() }))
@@ -116,7 +138,11 @@ export default function App() {
   const appState = state ? migrateState(state) : null;
   const routine = ROUTINES[Number(appState?.currentRoutineIndex || 0)] || ROUTINES[0];
   const pendingKnee = appState
-    ? routine.exercises.filter((exercise) => exercise.anchorSession && profileById(exercise.profileId).kneeSensitive && instanceView(exercise, appState).kneeCheckPending)
+    ? routine.exercises.filter((exercise) => {
+        const profile = profileById(exercise.profileId);
+        const view = instanceView(exercise, appState);
+        return exercise.anchorSession && (profile.kneeSensitive || profile.hamstringSensitive) && view.recoveryCheckPending;
+      })
     : [];
 
   useEffect(() => {
@@ -177,6 +203,7 @@ export default function App() {
         routineTitle: routine.title,
         notes: result.notes,
         kneeConfirmations: result.kneeConfirmations,
+        recoveryConfirmations: result.recoveryConfirmations,
         exercises: result.historyExercises,
       });
       await saveState(result.nextState);
@@ -212,6 +239,21 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function addBodyweight(value, note = "") {
+    const number = Number(value);
+    if (!number || !ownerUid) return;
+    const now = new Date();
+    setStatus(isOnline ? "저장 중" : "오프라인 대기");
+    await addDoc(collection(db, "users", ownerUid, "bodyweight"), {
+      value: number,
+      note,
+      date: now,
+      localDateKey: dateKey(now),
+      createdAt: serverTimestamp(),
+    });
+    setStatus(isOnline ? "저장됨" : "오프라인 대기");
   }
 
   async function resetAll() {
@@ -269,7 +311,7 @@ export default function App() {
             busy={busy}
           />
         )}
-        {tab === "history" && <HistoryView history={history} />}
+        {tab === "history" && <HistoryView history={history} bodyweightLogs={bodyweightLogs} onBodyweight={addBodyweight} />}
         {tab === "settings" && (
           <SettingsView
             state={appState}
@@ -279,6 +321,8 @@ export default function App() {
             onRecover={recover}
             onProfile={updateProfile}
             currentRoutine={routine}
+            history={history}
+            bodyweightLogs={bodyweightLogs}
             onDeload={manualDeload}
             onReset={resetAll}
             busy={busy}
@@ -363,6 +407,7 @@ function SessionAccordion({ routine, state, open, current, onToggle }) {
             <Badge>{summary.exerciseCount}종목</Badge>
             <Badge>{summary.totalSets}세트</Badge>
             {summary.hasKneeSensitive && <Badge amber>무릎 민감 종목 있음</Badge>}
+            {summary.hasHamstringSensitive && <Badge rose>햄스트링 민감 종목 있음</Badge>}
           </div>
         </div>
         <ChevronDown className={`h-5 w-5 text-app-muted transition ${open ? "rotate-180" : ""}`} />
@@ -390,12 +435,13 @@ function LogView({ state, routine, entries, setEntries, pendingKnee, kneeApprova
 
       {pendingKnee.length > 0 && (
         <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
-          <h2 className="font-bold text-amber-100">무릎 상태 체크</h2>
-          <p className="mt-1 text-sm text-amber-100/80">지난 앵커 세션에서 상한을 달성했어요. 다음 증량 전에 통증, 부종, 불안정이 없었는지만 확인합니다.</p>
+          <h2 className="font-bold text-amber-100">회복 상태 체크</h2>
+          <p className="mt-1 text-sm text-amber-100/80">지난 앵커 세션에서 상한을 달성했어요. 다음 증량 전에 부위별 회복 상태를 확인합니다.</p>
           <div className="mt-3 space-y-3">
             {pendingKnee.map((exercise) => (
               <div key={exercise.id} className="space-y-2">
                 <span className="text-sm font-bold text-white">{profileById(exercise.profileId).name}</span>
+                <p className="text-xs text-amber-100/80">{recoveryCheckText(profileById(exercise.profileId))}</p>
                 <div className="grid grid-cols-2 gap-2">
                   <button onClick={() => setKneeApprovals((prev) => ({ ...prev, [exercise.id]: true }))} className={`rounded-md px-3 py-3 text-sm ${kneeApprovals[exercise.id] === true ? "bg-emerald-500 text-white" : "bg-app-card text-app-muted"}`}>
                     문제 없음
@@ -506,26 +552,33 @@ function SessionDraftSummary({ summary }) {
   );
 }
 
-function HistoryView({ history }) {
+function HistoryView({ history, bodyweightLogs, onBodyweight }) {
   const [open, setOpen] = useState({});
   const [showAnalytics, setShowAnalytics] = useState(true);
   const groups = useMemo(() => groupHistoryByDate(history), [history]);
 
-  if (!history.length) return <Empty title="아직 기록이 없어" text="첫 세션을 완료하면 여기에 쌓입니다." />;
+  if (!history.length) {
+    return (
+      <section className="space-y-4">
+        <AnalyticsDashboard history={history} bodyweightLogs={bodyweightLogs} onBodyweight={onBodyweight} />
+        <Empty title="아직 운동 기록이 없어" text="첫 세션을 완료하면 날짜별 히스토리가 쌓입니다." />
+      </section>
+    );
+  }
 
   return (
     <section className="space-y-4">
       <article className="overflow-hidden rounded-lg border border-app-line bg-app-card">
         <button onClick={() => setShowAnalytics((value) => !value)} className="flex w-full items-center justify-between gap-3 p-4 text-left">
           <div>
-            <h2 className="font-bold text-white">분석 보기</h2>
-            <p className="mt-1 text-sm text-app-muted">주간 볼륨, 주요 운동 진행, 수행률</p>
+            <h2 className="font-bold text-white">대시보드</h2>
+            <p className="mt-1 text-sm text-app-muted">주요 운동 진행, 체중 추세, 고급 분석</p>
           </div>
           <ChevronDown className={`h-5 w-5 text-app-muted transition ${showAnalytics ? "rotate-180" : ""}`} />
         </button>
         {showAnalytics && (
           <div className="space-y-4 border-t border-app-line p-4">
-            <AnalyticsDashboard history={history} />
+            <AnalyticsDashboard history={history} bodyweightLogs={bodyweightLogs} onBodyweight={onBodyweight} />
           </div>
         )}
       </article>
@@ -551,15 +604,19 @@ function HistoryView({ history }) {
   );
 }
 
-function AnalyticsDashboard({ history }) {
+function AnalyticsDashboard({ history, bodyweightLogs, onBodyweight }) {
   const weekly = useMemo(() => weeklyMuscleVolume(history, 10), [history]);
   const progression = useMemo(() => progressionSeries(history), [history]);
   const compliance = useMemo(() => complianceSeries(history, 10), [history]);
+  const bodyweight = useMemo(() => bodyweightWeeklyAverage(bodyweightLogs, 10), [bodyweightLogs]);
+  const recommendations = useMemo(() => plateauRecommendations(history, bodyweightLogs, 4), [history, bodyweightLogs]);
   return (
     <div className="space-y-4">
-      <WeeklyMuscleVolumeChart rows={weekly} />
       <ProgressionCharts series={progression} />
+      <BodyweightCard rows={bodyweight} logs={bodyweightLogs} onSave={onBodyweight} />
+      <RecommendationCard recommendations={recommendations} />
       <ComplianceChart rows={compliance} />
+      <AdvancedAnalytics rows={weekly} />
     </div>
   );
 }
@@ -605,7 +662,7 @@ function ProgressionCharts({ series }) {
   return (
     <section className="rounded-lg border border-app-line bg-app-card p-4">
       <h2 className="font-bold text-white">주요 운동 진행</h2>
-      <p className="mt-1 text-sm text-app-muted">무게 추세와 총 반복수</p>
+      <p className="mt-1 text-sm text-app-muted">벤치/덤벨숄더/RDL은 e1RM, 나머지는 작업중량 기준</p>
       <div className="mt-4 space-y-3">
         {series.map((item) => (
           <MiniLineChart key={item.profileId} title={item.name} points={item.points} />
@@ -619,13 +676,13 @@ function MiniLineChart({ title, points }) {
   const recent = points.slice(-8);
   const width = 260;
   const height = 72;
-  const max = Math.max(...recent.map((point) => point.weight), 1);
-  const min = Math.min(...recent.map((point) => point.weight), 0);
+  const max = Math.max(...recent.map((point) => point.metric || point.weight), 1);
+  const min = Math.min(...recent.map((point) => point.metric || point.weight), 0);
   const span = Math.max(1, max - min);
   const path = recent
     .map((point, index) => {
       const x = recent.length === 1 ? width : (index / (recent.length - 1)) * width;
-      const y = height - ((point.weight - min) / span) * (height - 12) - 6;
+      const y = height - (((point.metric || point.weight) - min) / span) * (height - 12) - 6;
       return `${index === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
     })
     .join(" ");
@@ -635,14 +692,16 @@ function MiniLineChart({ title, points }) {
     <div className="rounded-md bg-app-bg p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="text-sm font-bold text-white">{title}</span>
-        <span className="text-xs text-app-muted">{latest ? `${latest.weight}kg · ${latest.totalReps}` : "기록 없음"}</span>
+        <span className="text-xs text-app-muted">
+          {latest ? `${latest.metricLabel} ${latest.metric} · ${latest.displayWeight}kg · ${latest.totalReps}회` : "기록 없음"}
+        </span>
       </div>
       {recent.length ? (
         <svg viewBox={`0 0 ${width} ${height}`} className="h-20 w-full overflow-visible">
           <path d={path} fill="none" stroke="#6366f1" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
           {recent.map((point, index) => {
             const x = recent.length === 1 ? width / 2 : (index / (recent.length - 1)) * width;
-            const y = height - ((point.weight - min) / span) * (height - 12) - 6;
+            const y = height - (((point.metric || point.weight) - min) / span) * (height - 12) - 6;
             return <circle key={`${point.id}-${index}`} cx={x} cy={y} r="4" fill="#10b981" />;
           })}
         </svg>
@@ -650,6 +709,89 @@ function MiniLineChart({ title, points }) {
         <p className="py-5 text-center text-sm text-app-muted">아직 기록 없음</p>
       )}
     </div>
+  );
+}
+
+function BodyweightCard({ rows, logs, onSave }) {
+  const [value, setValue] = useState("");
+  const recent = rows.filter((row) => row.average > 0);
+  const latest = logs[0];
+  const max = Math.max(...recent.map((row) => row.average), 1);
+  const min = Math.min(...recent.map((row) => row.average), 0);
+  const span = Math.max(1, max - min);
+
+  async function save() {
+    await onSave(value);
+    setValue("");
+  }
+
+  return (
+    <section className="rounded-lg border border-app-line bg-app-card p-4">
+      <h2 className="font-bold text-white">체중 추세</h2>
+      <p className="mt-1 text-sm text-app-muted">가능하면 매일 입력하고, 차트는 주간 평균으로 봅니다.</p>
+      <div className="mt-4 flex gap-2">
+        <input
+          type="number"
+          step="0.1"
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          placeholder={latest ? `최근 ${latest.value}kg` : "체중 kg"}
+          className="min-w-0 flex-1 rounded-md border border-app-line bg-app-bg px-3 text-white outline-none focus:border-app-accent"
+        />
+        <button onClick={save} className="rounded-md bg-app-accent px-4 py-3 font-bold text-white">저장</button>
+      </div>
+      <div className="mt-4 flex h-20 items-end gap-2">
+        {rows.map((row) => (
+          <div key={row.week} className="flex flex-1 flex-col items-center gap-1">
+            <div
+              className={`w-full rounded-sm ${row.average ? "bg-emerald-500" : "bg-app-bg"}`}
+              style={{ height: `${row.average ? Math.max(4, ((row.average - min) / span) * 56 + 4) : 4}px` }}
+            />
+            <span className="text-[10px] text-app-muted">{row.average || "-"}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function RecommendationCard({ recommendations }) {
+  return (
+    <section className="rounded-lg border border-app-line bg-app-card p-4">
+      <h2 className="font-bold text-white">정체 추천</h2>
+      {recommendations.length ? (
+        <div className="mt-3 space-y-2">
+          {recommendations.map((item, index) => (
+            <div key={`${item.type}-${index}`} className="rounded-md bg-app-bg p-3">
+              <p className="font-bold text-white">{item.title}</p>
+              <p className="mt-1 text-sm text-app-muted">{item.text}</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-2 text-sm text-app-muted">아직 정체 추천을 낼 만큼 기록이 충분하지 않거나, 진행이 정상 범위입니다.</p>
+      )}
+    </section>
+  );
+}
+
+function AdvancedAnalytics({ rows }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <article className="overflow-hidden rounded-lg border border-app-line bg-app-card">
+      <button onClick={() => setOpen((value) => !value)} className="flex w-full items-center justify-between gap-3 p-4 text-left">
+        <div>
+          <h2 className="font-bold text-white">고급 분석</h2>
+          <p className="mt-1 text-sm text-app-muted">근육군별 주간 kg 볼륨 추세</p>
+        </div>
+        <ChevronDown className={`h-5 w-5 text-app-muted transition ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="border-t border-app-line p-4">
+          <WeeklyMuscleVolumeChart rows={rows} />
+        </div>
+      )}
+    </article>
   );
 }
 
@@ -680,6 +822,15 @@ function SessionHistoryCard({ session }) {
         <span className="text-xs text-app-muted">{formatNumber(sessionVolume(session))}</span>
       </div>
       {session.notes && <p className="mt-3 rounded-md bg-app-card px-3 py-2 text-sm text-app-muted">{session.notes}</p>}
+      {session.recoveryConfirmations || session.kneeConfirmations ? (
+        <div className="mt-3 rounded-md bg-app-card px-3 py-2 text-xs text-app-muted">
+          {Object.values(session.recoveryConfirmations || session.kneeConfirmations || {}).map((item, index) => (
+            <span key={index} className="mr-2">
+              {item.type === "hamstring" ? "햄스트링" : "무릎"} {item.clean ? "문제 없음" : "불편함"}
+            </span>
+          ))}
+        </div>
+      ) : null}
       <div className="mt-3 space-y-2">
         {(session.exercises || []).map((exercise) => (
           <div key={exercise.id} className="rounded-md bg-app-card px-3 py-2 text-sm">
@@ -706,6 +857,8 @@ function SettingsSessionAccordion({ routine, state, open, onToggle, onProfile })
           <div className="flex items-center gap-2">
             <h3 className="font-black text-white">{routine.name}</h3>
             <span className="rounded-md bg-app-card px-2 py-1 text-xs text-app-muted">{routine.day}</span>
+            {summary.hasKneeSensitive && <Badge amber>무릎</Badge>}
+            {summary.hasHamstringSensitive && <Badge rose>햄스트링</Badge>}
           </div>
           <p className="mt-1 text-xs text-app-muted">
             {summary.exerciseCount}종목 · {summary.totalSets}세트
@@ -731,6 +884,7 @@ function SettingsSessionAccordion({ routine, state, open, onToggle, onProfile })
                     </span>
                   </span>
                   {profile.kneeSensitive && <Badge amber>무릎</Badge>}
+                  {profile.hamstringSensitive && <Badge rose>햄스트링</Badge>}
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   <NumberField
@@ -755,7 +909,7 @@ function SettingsSessionAccordion({ routine, state, open, onToggle, onProfile })
   );
 }
 
-function SettingsView({ state, recoveryCode, recoveryInput, setRecoveryInput, onRecover, onProfile, currentRoutine, onDeload, onReset, busy }) {
+function SettingsView({ state, recoveryCode, recoveryInput, setRecoveryInput, onRecover, onProfile, currentRoutine, history, bodyweightLogs, onDeload, onReset, busy }) {
   const [copied, setCopied] = useState(false);
   const [open, setOpen] = useState(() => ({ [ROUTINES[Number(state.currentRoutineIndex || 0)]?.id || "a1"]: true }));
   const [onlyToday, setOnlyToday] = useState(true);
@@ -832,6 +986,30 @@ function SettingsView({ state, recoveryCode, recoveryInput, setRecoveryInput, on
           </button>
         </div>
       </div>
+
+      <PlannedSetBalanceCard />
+    </section>
+  );
+}
+
+function PlannedSetBalanceCard() {
+  const balance = useMemo(() => plannedWeeklySetBalance(ROUTINES), []);
+  const max = Math.max(...Object.values(balance), 1);
+  return (
+    <section className="rounded-lg border border-app-line bg-app-card p-4">
+      <h2 className="font-bold text-white">계획 세트 밸런스</h2>
+      <p className="mt-1 text-sm text-app-muted">루틴이 의도한 주간 직접 세트 분포입니다. 실제 수행 차트가 아니라 계획 카드입니다.</p>
+      <div className="mt-4 space-y-2">
+        {MUSCLE_GROUPS.map((muscle) => (
+          <div key={muscle.id} className="grid grid-cols-[86px_1fr_36px] items-center gap-2 text-xs">
+            <span className="text-app-muted">{muscle.label}</span>
+            <div className="h-3 overflow-hidden rounded-full bg-app-bg">
+              <div className="h-full rounded-full" style={{ width: `${(balance[muscle.id] / max) * 100}%`, backgroundColor: muscle.color }} />
+            </div>
+            <span className="text-right text-app-muted">{balance[muscle.id]}</span>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
@@ -863,7 +1041,7 @@ function ExerciseLogCard({ exercise, view, children }) {
           </p>
         </div>
         <span className="shrink-0 rounded-md px-2 py-1 text-xs font-bold text-white" style={{ backgroundColor: meta.color }}>
-          {view.kneeSensitive ? "무릎 주의" : meta.label}
+          {view.kneeSensitive ? "무릎 주의" : view.hamstringSensitive ? "햄스트링 주의" : meta.label}
         </span>
       </div>
       {children}
@@ -908,8 +1086,9 @@ function Info({ label, value, warn }) {
   );
 }
 
-function Badge({ children, amber }) {
-  return <span className={`rounded-md px-2 py-1 text-xs font-bold ${amber ? "bg-amber-500/20 text-amber-200" : "bg-app-bg text-app-muted"}`}>{children}</span>;
+function Badge({ children, amber, rose }) {
+  const tone = amber ? "bg-amber-500/20 text-amber-200" : rose ? "bg-rose-500/20 text-rose-200" : "bg-app-bg text-app-muted";
+  return <span className={`rounded-md px-2 py-1 text-xs font-bold ${tone}`}>{children}</span>;
 }
 
 function Empty({ title, text }) {
@@ -954,6 +1133,16 @@ function sessionDraftSummary(routine, state, entries) {
     },
     { totalReps: 0, improvedCount: 0, stallRiskCount: 0, topReadyCount: 0 }
   );
+}
+
+function recoveryCheckText(profile) {
+  if (profile.hamstringSensitive) {
+    return "다음날 날카로운 뒤허벅지 통증, 비정상적 국소 근육통, 회복 지연이 없었는지 확인";
+  }
+  if (profile.kneeSensitive) {
+    return "다음날 통증, 부종, 불안정감/꺾임이 없었는지 확인";
+  }
+  return "다음날 회복 상태 확인";
 }
 
 function formatWeight(weight, profile) {
