@@ -1,9 +1,12 @@
-const CACHE_NAME = "workout-tracker-v16";
+const CACHE_NAME = "workout-tracker-v18";
 const APP_SHELL = [
   "/workout-tracker/",
   "/workout-tracker/manifest.json",
+  "/workout-tracker/icons/apple-touch-icon.png",
   "/workout-tracker/icons/icon-192.png",
-  "/workout-tracker/icons/icon-512.png"
+  "/workout-tracker/icons/icon-512.png",
+  "/workout-tracker/icons/icon-maskable-192.png",
+  "/workout-tracker/icons/icon-maskable-512.png"
 ];
 
 self.addEventListener("install", (event) => {
