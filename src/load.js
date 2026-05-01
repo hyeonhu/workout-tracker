@@ -58,7 +58,7 @@ export function weightBasisLabel(profile) {
     case "per_side":
       return "한쪽 기준";
     case "bodyweight":
-      return profile?.isTime ? "초/맨몸 기준" : "맨몸 기준";
+      return profile?.isTime ? "초 단위 기준" : "맨몸 기준";
     case "total":
     default:
       return "총중량 기준";
@@ -112,13 +112,13 @@ export function warmupHelperText(exercise, view) {
     case "barbell_total":
     case "smith_total":
     case "plate_per_side":
-      return `웜업: ${firstSetText(view)} → ${warmupStepText(view, total * 0.5, "6~8")} → ${warmupStepText(view, total * 0.7, "3~5")}`;
+      return ["웜업", `1세트 : ${firstSetText(view)} 10~12회`, `2세트 : ${warmupStepText(view, total * 0.5)} 6~8회`, `3세트 : ${warmupStepText(view, total * 0.7)} 3~5회`].join("\n");
     case "stack_weight":
-      return `웜업: ${warmupStepText(view, total * 0.45, "8~10")} → ${warmupStepText(view, total * 0.7, "4~6")}`;
+      return ["웜업", `1세트 : ${warmupStepText(view, total * 0.45)} 8~10회`, `2세트 : ${warmupStepText(view, total * 0.7)} 4~6회`].join("\n");
     case "dumbbell_each_hand":
-      return `웜업: ${warmupStepText(view, total * 0.5, "8")} → ${warmupStepText(view, total * 0.7, "4~5")}`;
+      return ["웜업", `1세트 : ${warmupStepText(view, total * 0.5)} 8회`, `2세트 : ${warmupStepText(view, total * 0.7)} 4~5회`].join("\n");
     case "bodyweight_progression":
-      return "웜업: 동적 준비만 진행";
+      return ["웜업", "동적 준비만 진행"].join("\n");
     default:
       return null;
   }
@@ -163,29 +163,29 @@ function warmupStep(profile) {
 }
 
 function firstSetText(profile) {
-  if (profile.loadType === "smith_total") return "빈 스미스 x10~12";
-  if (profile.loadType === "plate_per_side") return "아주 가볍게 x10~12";
-  return "빈바 x10~12";
+  if (profile.loadType === "smith_total") return "빈 스미스바";
+  if (profile.loadType === "plate_per_side") return "아주 가볍게";
+  return "빈바";
 }
 
-function warmupStepText(profile, normalizedLoad, repsText) {
+function warmupStepText(profile, normalizedLoad) {
   const entryWeight = convertNormalizedToEntry(profile, normalizedLoad);
   switch (profile.displayMode) {
     case "per_side_plus_bar": {
       const baseWeight = effectiveBaseWeight(profile, profile.baseWeight);
       const total = normalizeTotalLoad(profile, entryWeight, baseWeight);
-      return `한쪽 ${roundDisplay(entryWeight)}kg(총 ${roundDisplay(total)}kg) x${repsText}`;
+      return `한쪽 ${roundDisplay(entryWeight)}kg (총 ${roundDisplay(total)}kg)`;
     }
     case "per_hand":
-      return `한 손 ${roundDisplay(entryWeight)}kg x${repsText}`;
+      return `한 손 ${roundDisplay(entryWeight)}kg`;
     case "stack":
-      return `${roundDisplay(entryWeight)}kg x${repsText}`;
+      return `${roundDisplay(entryWeight)}kg`;
     case "per_side": {
       const total = normalizeTotalLoad(profile, entryWeight, profile.baseWeight);
-      return `한쪽 ${roundDisplay(entryWeight)}kg(총 ${roundDisplay(total)}kg) x${repsText}`;
+      return `한쪽 ${roundDisplay(entryWeight)}kg (총 ${roundDisplay(total)}kg)`;
     }
     default:
-      return `${roundDisplay(entryWeight)}kg x${repsText}`;
+      return `${roundDisplay(entryWeight)}kg`;
   }
 }
 

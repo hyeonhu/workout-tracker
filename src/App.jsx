@@ -572,7 +572,7 @@ function SessionAccordion({ routine, state, open, current, onToggle, onExerciseT
       {open && (
         <div className="space-y-3 border-t border-app-line p-4">
           {warmupText ? (
-            <div className="rounded-md border border-app-line bg-app-bg px-3 py-2 text-sm text-app-muted">
+            <div className="whitespace-pre-line rounded-md bg-app-bg px-3 py-3 text-sm leading-6 text-amber-200">
               {warmupText}
             </div>
           ) : null}
@@ -667,10 +667,11 @@ function LogView({
               {reps.map((rep, index) => (
                 <RepInput
                   key={`${exercise.id}-${index}`}
+                  label={`${index + 1}\uC138\uD2B8`}
                   value={rep}
                   min={exercise.min}
                   max={exercise.max}
-                  unit={view.isTime ? "초" : "회"}
+                  unit={view.isTime ? "\uCD08" : "\uD68C"}
                   onChange={(value) =>
                     setEntries((prev) => ({
                       ...prev,
@@ -1370,11 +1371,14 @@ function ExerciseLogCard({ exercise, view, children }) {
   );
 }
 
-function RepInput({ value, min, max, unit, onChange }) {
+function RepInput({ label, value, min, max, unit, onChange }) {
   const number = Number(value || 0);
   const tone = number >= max ? "border-emerald-500 text-emerald-200" : number < min ? "border-red-500 text-red-200" : "border-app-line text-white";
   return (
-    <div className="grid w-full min-w-0 grid-cols-[52px_minmax(88px,112px)_52px] justify-center gap-2">
+    <div className="grid w-full min-w-0 grid-cols-[72px_52px_minmax(88px,112px)_52px] justify-center gap-2">
+      <div className="flex h-12 items-center justify-center rounded-md bg-app-bg text-sm font-bold text-white">
+        {label}
+      </div>
       <button type="button" onClick={() => onChange(Math.max(0, number - 1))} className="flex h-12 w-[52px] items-center justify-center rounded-md bg-app-bg text-white">
         <Minus className="h-5 w-5" />
       </button>
