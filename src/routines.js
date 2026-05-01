@@ -11,10 +11,10 @@ export const CATEGORY_META = {
 export const MUSCLE_GROUPS = [
   { id: "chest", label: "가슴", color: "#ef4444" },
   { id: "back", label: "등", color: "#3b82f6" },
-  { id: "lateral_delts", label: "측면 어깨", color: "#6366f1" },
-  { id: "rear_delts", label: "후면 어깨", color: "#8b5cf6" },
+  { id: "lateral_delts", label: "측면 삼각근", color: "#6366f1" },
+  { id: "rear_delts", label: "후면 삼각근", color: "#8b5cf6" },
   { id: "quads", label: "대퇴사두", color: "#f59e0b" },
-  { id: "hamstrings_glutes", label: "햄/둔근", color: "#a855f7" },
+  { id: "hamstrings_glutes", label: "햄스트링/둔근", color: "#a855f7" },
   { id: "biceps", label: "이두", color: "#10b981" },
   { id: "triceps", label: "삼두", color: "#14b8a6" },
   { id: "core", label: "코어", color: "#eab308" },
@@ -181,7 +181,7 @@ export const EXERCISE_PROFILES = {
     entryMode: "per_side_plus_bar",
     displayMode: "per_side_plus_bar",
     defaultIncrement: 2.5,
-    defaultWeight: 0,
+    defaultWeight: 40,
     baseWeight: 20,
     baseWeightEditable: true,
     muscleFactors: { hamstrings_glutes: 1 },
@@ -350,7 +350,11 @@ export function migrateState(rawState) {
       migrated.profileData[exercise.profileId] = {
         ...migrated.profileData[exercise.profileId],
         weight: Number(old.weight ?? migrated.profileData[exercise.profileId].weight ?? 0),
-        incrementStep: Number(old.incrementStep ?? migrated.profileData[exercise.profileId].incrementStep ?? defaultIncrementFor(profileById(exercise.profileId))),
+        incrementStep: Number(
+          old.incrementStep ??
+            migrated.profileData[exercise.profileId].incrementStep ??
+            defaultIncrementFor(profileById(exercise.profileId))
+        ),
         initialized: Boolean(old.initialized || migrated.profileData[exercise.profileId].initialized),
         kneeCheckPending: Boolean(old.kneeCheckPending || migrated.profileData[exercise.profileId].kneeCheckPending),
         hamstringCheckPending: Boolean(old.hamstringCheckPending || migrated.profileData[exercise.profileId].hamstringCheckPending),
@@ -370,7 +374,9 @@ export function migrateState(rawState) {
       ...base.profileData[profileItem.id],
       ...current,
       baseWeight: Number(current.baseWeight ?? base.profileData[profileItem.id].baseWeight ?? profileItem.baseWeight ?? 0),
-      incrementStep: Number(current.incrementStep ?? base.profileData[profileItem.id].incrementStep ?? profileItem.defaultIncrement ?? 0),
+      incrementStep: Number(
+        current.incrementStep ?? base.profileData[profileItem.id].incrementStep ?? profileItem.defaultIncrement ?? 0
+      ),
       initialized: Boolean(current.initialized || base.profileData[profileItem.id].initialized || profileItem.isTime),
       recoveryCheckPending: Boolean(current.recoveryCheckPending || current.kneeCheckPending || current.hamstringCheckPending),
       kneeCheckPending: Boolean(current.kneeCheckPending),

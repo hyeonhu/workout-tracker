@@ -1345,14 +1345,14 @@ function ExerciseCard({ exercise, view, helperText }) {
   return (
     <ExerciseLogCard exercise={exercise} view={view}>
       <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-        <Info label="??" value={view.initialized || view.isTime ? formatWeight(view.weight, view) : "?? ??"} />
-        <Info label="??" value={`? ${Number(view.targetTotal || exercise.defaultSets * exercise.min)}${view.isTime ? "?" : "?"} ??`} />
-        <Info label="??" value={`${view.currentSets || exercise.defaultSets}?? x ${exercise.min}~${exercise.max}${view.isTime ? "?" : "?"}`} />
-        <Info label="??" value={`${view.stagnationCount || 0}?`} warn={Number(view.stagnationCount || 0) > 0} />
+        <Info label="현재" value={view.initialized || view.isTime ? formatWeight(view.weight, view) : "설정 필요"} />
+        <Info label="목표" value={`총 ${Number(view.targetTotal || exercise.defaultSets * exercise.min)}${view.isTime ? "초" : "회"} 이상`} />
+        <Info label="구성" value={`${view.currentSets || exercise.defaultSets}세트 x ${exercise.min}~${exercise.max}${view.isTime ? "초" : "회"}`} />
+        <Info label="정체" value={`${view.stagnationCount || 0}회`} warn={Number(view.stagnationCount || 0) > 0} />
       </div>
       {helperText ? <p className="mt-3 text-sm text-amber-200">{helperText}</p> : null}
-      {view.kneeCheckPending ? <p className="mt-3 rounded-md bg-amber-500/15 px-3 py-2 text-sm text-amber-200">?? ?? ?? ?? ?</p> : null}
-      {view.hamstringCheckPending ? <p className="mt-3 rounded-md bg-rose-500/15 px-3 py-2 text-sm text-rose-200">???? ?? ?? ?? ?</p> : null}
+      {view.kneeCheckPending ? <p className="mt-3 rounded-md bg-amber-500/15 px-3 py-2 text-sm text-amber-200">무릎 상태 체크 대기 중</p> : null}
+      {view.hamstringCheckPending ? <p className="mt-3 rounded-md bg-rose-500/15 px-3 py-2 text-sm text-rose-200">햄스트링 상태 체크 대기 중</p> : null}
     </ExerciseLogCard>
   );
 }
