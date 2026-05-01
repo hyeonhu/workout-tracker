@@ -9,20 +9,22 @@ import {
   weeklyDirectHardSets,
   weeklyMuscleVolume,
 } from "../src/analytics.js";
+import { miniWarmupHelperText, warmupHelperText } from "../src/load.js";
 import { completeSession } from "../src/progression.js";
-import { ROUTINES, createInitialState, migrateState, profileById } from "../src/routines.js";
+import { ROUTINES, createInitialState, instanceView, migrateState, profileById } from "../src/routines.js";
 
 parse(fs.readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8"), {
   sourceType: "module",
   plugins: ["jsx"],
 });
 
-assert.equal(profileById("seated_db_shoulder_press").name, "시티드 덤벨 숄더프레스");
 assert.equal(profileById("leg_extension").loadType, "stack_weight");
 assert.equal(profileById("smith_hip_thrust").loadType, "smith_total");
 assert.equal(profileById("incline_bench_chest_supported_db_row").entryMode, "per_hand");
+assert.equal(profileById("ez_bar_curl").loadType, "barbell_total");
 
 const initial = createInitialState();
+
 const b2Entries = Object.fromEntries(ROUTINES[3].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.max)]));
 const b2Result = completeSession(initial, ROUTINES[3], b2Entries, {});
 assert.equal(b2Result.nextState.profileData.lat_pulldown.weight, initial.profileData.lat_pulldown.weight, "B2 lat pulldown must not progress shared load");
@@ -51,6 +53,13 @@ const legacy = migrateState({
 });
 assert.equal(legacy.profileData.seated_db_shoulder_press.weight, 12.5);
 assert.equal(legacy.profileData.smith_hip_thrust.weight, 40);
+
+const benchView = instanceView(ROUTINES[0].exercises[0], initial);
+assert.match(warmupHelperText(ROUTINES[0].exercises[0], benchView), /웜업/);
+assert.match(warmupHelperText(ROUTINES[0].exercises[0], benchView), /한쪽 2.5kg/);
+assert.equal(miniWarmupHelperText(ROUTINES[2].exercises[4]), null, "A2 leg extension should not show mini warm-up");
+assert.equal(miniWarmupHelperText(ROUTINES[1].exercises[3]), "햄스트링 적응세트 1개 추천");
+assert.equal(miniWarmupHelperText(ROUTINES[3].exercises[6]), "웜업: 동적 준비만 진행");
 
 const history = [
   {

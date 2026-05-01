@@ -7,6 +7,20 @@ const LOAD_TYPE_TOTAL_FACTORS = {
   bodyweight_progression: 0,
 };
 
+const MINI_WARMUP_HINTS = {
+  a1_lat_pulldown: "가벼운 무게 1세트 ×8 추천",
+  a1_leg_press: "무릎 적응세트 1개 추천",
+  b1_seated_db_shoulder_press: "가벼운 덤벨 1세트 ×8 추천",
+  b1_seated_cable_row: "가벼운 무게 1세트 ×8 추천",
+  b1_leg_curl: "햄스트링 적응세트 1개 추천",
+  a2_neutral_lat_pulldown: "가벼운 무게 1세트 ×8 추천",
+  a2_leg_press: "무릎 적응세트 1개 추천",
+  a2_reverse_crunch: "웜업: 동적 준비만 진행",
+  b2_chest_supported_row: "가벼운 덤벨 1세트 ×8 추천",
+  b2_leg_curl: "햄스트링 적응세트 1개 추천",
+  b2_plank: "웜업: 동적 준비만 진행",
+};
+
 export function normalizeTotalLoad(profile, enteredWeight, baseWeightOverride) {
   const entry = Number(enteredWeight || 0);
   const baseWeight = effectiveBaseWeight(profile, baseWeightOverride);
@@ -69,7 +83,7 @@ export function formatWeightDisplay(weight, profile, options = {}) {
   const entry = roundDisplay(weight);
   const baseWeight = effectiveBaseWeight(profile, options.baseWeight);
   const total = normalizeTotalLoad(profile, weight, baseWeight);
-  const includeTotal = Boolean(options.includeTotal && total);
+  const includeTotal = Boolean(options.includeTotal && total !== null);
 
   if (profile?.isTime) return `${entry}초`;
 
@@ -93,7 +107,7 @@ export function formatWeightDisplay(weight, profile, options = {}) {
   }
 }
 
-export function metricDisplayLabel(profileId, useE1rm) {
+export function metricDisplayLabel(_profileId, useE1rm) {
   return useE1rm ? "e1RM" : "총중량";
 }
 
@@ -102,8 +116,14 @@ export function displayMetricWeight(profile, exercise) {
   return normalizeLoggedLoad(exercise, profile) || 0;
 }
 
-export function warmupHelperText(exercise, view) {
-  if (!view || !usesNormalizedLoad(view) || Number(view.weight || 0) <= 0) return null;
+export function warmupHelperText(_exercise, view) {
+  if (!view) return null;
+
+  if (view.loadType === "bodyweight_progression") {
+    return ["웜업", "동적 준비만 진행"].join("\n");
+  }
+
+  if (!usesNormalizedLoad(view) || Number(view.weight || 0) <= 0) return null;
 
   const total = normalizeTotalLoad(view, view.weight, view.baseWeight);
   if (!total) return null;
@@ -112,21 +132,36 @@ export function warmupHelperText(exercise, view) {
     case "barbell_total":
     case "smith_total":
     case "plate_per_side":
-      return ["웜업", `1세트 : ${firstSetText(view)} 10~12회`, `2세트 : ${warmupStepText(view, total * 0.5)} 6~8회`, `3세트 : ${warmupStepText(view, total * 0.7)} 3~5회`].join("\n");
+      return [
+        "웜업",
+        `1세트 : ${firstSetText(view)} 10~12회`,
+        `2세트 : ${warmupStepText(view, total * 0.5)} 6~8회`,
+        `3세트 : ${warmupStepText(view, total * 0.7)} 3~5회`,
+      ].join("\n");
     case "stack_weight":
-      return ["웜업", `1세트 : ${warmupStepText(view, total * 0.45)} 8~10회`, `2세트 : ${warmupStepText(view, total * 0.7)} 4~6회`].join("\n");
+      return [
+        "웜업",
+        `1세트 : ${warmupStepText(view, total * 0.45)} 8~10회`,
+        `2세트 : ${warmupStepText(view, total * 0.7)} 4~6회`,
+      ].join("\n");
     case "dumbbell_each_hand":
-      return ["웜업", `1세트 : ${warmupStepText(view, total * 0.5)} 8회`, `2세트 : ${warmupStepText(view, total * 0.7)} 4~5회`].join("\n");
-    case "bodyweight_progression":
-      return ["웜업", "동적 준비만 진행"].join("\n");
+      return [
+        "웜업",
+        `1세트 : ${warmupStepText(view, total * 0.5)} 8회`,
+        `2세트 : ${warmupStepText(view, total * 0.7)} 4~5회`,
+      ].join("\n");
     default:
       return null;
   }
 }
 
+export function miniWarmupHelperText(exercise) {
+  return MINI_WARMUP_HINTS[exercise?.id] || null;
+}
+
 export function warmupHintText(profile) {
   if (!profile || profile.loadType === "bodyweight_progression" || profile.isTime) return null;
-  return "가벼운 무게 1세트 x 8 추천";
+  return "가벼운 무게 1세트 ×8 추천";
 }
 
 export function roundWarmupEntry(profile, entryWeight) {
