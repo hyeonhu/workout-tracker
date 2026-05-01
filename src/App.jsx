@@ -79,6 +79,7 @@ export default function App() {
   const scrollPositionsRef = useRef({});
   const previousTabRef = useRef(tab);
   const skipScrollRestoreRef = useRef(false);
+  const routinePointerRepairRef = useRef("");
 
   function changeTab(nextTab, options = {}) {
     if (typeof window !== "undefined") {
@@ -151,6 +152,29 @@ export default function App() {
       setHistory(rows);
     });
   }, [user, ownerUid]);
+
+  useEffect(() => {
+    if (!appState || !history.length || !ownerUid) return;
+    const latest = history[0];
+    const latestIndex = ROUTINES.findIndex((item) => item.id === latest.sessionId);
+    const currentIndex = Number(appState.currentRoutineIndex || 0);
+    if (latestIndex < 0 || latestIndex !== currentIndex) return;
+
+    const repairKey = `${ownerUid}:${latest.id || latest.completedAtLocal || latest.localDateKey || latest.sessionId}`;
+    if (routinePointerRepairRef.current === repairKey) return;
+    routinePointerRepairRef.current = repairKey;
+
+    const repairedState = {
+      ...appState,
+      currentRoutineIndex: (currentIndex + 1) % ROUTINES.length,
+      updatedAt: Date.now(),
+    };
+
+    setState(repairedState);
+    saveState(repairedState).catch(() => {
+      routinePointerRepairRef.current = "";
+    });
+  }, [appState, history, ownerUid]);
 
   useEffect(() => {
     if (!user || !ownerUid || recoveryCode) return;
