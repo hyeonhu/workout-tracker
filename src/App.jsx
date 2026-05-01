@@ -80,6 +80,15 @@ export default function App() {
   const previousTabRef = useRef(tab);
   const skipScrollRestoreRef = useRef(false);
   const routinePointerRepairRef = useRef("");
+  const appState = state ? migrateState(state) : null;
+  const routine = ROUTINES[Number(appState?.currentRoutineIndex || 0)] || ROUTINES[0];
+  const pendingKnee = appState
+    ? routine.exercises.filter((exercise) => {
+        const profile = profileById(exercise.profileId);
+        const view = instanceView(exercise, appState);
+        return exercise.anchorSession && (profile.kneeSensitive || profile.hamstringSensitive) && view.recoveryCheckPending;
+      })
+    : [];
 
   function changeTab(nextTab, options = {}) {
     if (typeof window !== "undefined") {
@@ -197,16 +206,6 @@ export default function App() {
       window.removeEventListener("offline", updateOnlineStatus);
     };
   }, []);
-
-  const appState = state ? migrateState(state) : null;
-  const routine = ROUTINES[Number(appState?.currentRoutineIndex || 0)] || ROUTINES[0];
-  const pendingKnee = appState
-    ? routine.exercises.filter((exercise) => {
-        const profile = profileById(exercise.profileId);
-        const view = instanceView(exercise, appState);
-        return exercise.anchorSession && (profile.kneeSensitive || profile.hamstringSensitive) && view.recoveryCheckPending;
-      })
-    : [];
 
   useEffect(() => {
     if (!appState) return;
