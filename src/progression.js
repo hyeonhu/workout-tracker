@@ -2,10 +2,10 @@ import {
   ROUTINES,
   createInitialInstanceData,
   createInitialProfileData,
-  instanceView,
   migrateState,
   profileById,
 } from "./routines.js";
+import { effectiveBaseWeight, normalizeTotalLoad } from "./load.js";
 
 export function completeSession(rawState, routine, entries, kneeApprovals, notes = "") {
   const state = migrateState(rawState);
@@ -19,12 +19,18 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
     const profileState = {
       ...profileData[profile.id],
       weight: Number(profileData[profile.id]?.weight || 0),
+      baseWeight: Number(profileData[profile.id]?.baseWeight ?? profile.baseWeight ?? 0),
       incrementStep: Number(profileData[profile.id]?.incrementStep || profile.defaultIncrement || 0),
       initialized: Boolean(profileData[profile.id]?.initialized || profile.isTime),
       kneeCheckPending: Boolean(profileData[profile.id]?.kneeCheckPending),
       hamstringCheckPending: Boolean(profileData[profile.id]?.hamstringCheckPending),
-      recoveryCheckPending: Boolean(profileData[profile.id]?.recoveryCheckPending || profileData[profile.id]?.kneeCheckPending || profileData[profile.id]?.hamstringCheckPending),
+      recoveryCheckPending: Boolean(
+        profileData[profile.id]?.recoveryCheckPending ||
+          profileData[profile.id]?.kneeCheckPending ||
+          profileData[profile.id]?.hamstringCheckPending
+      ),
     };
+
     let instanceState = {
       ...instanceData[exercise.id],
       lastReps: Array.isArray(instanceData[exercise.id]?.lastReps) ? instanceData[exercise.id].lastReps : [],
@@ -56,6 +62,7 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
     const improved = totalReps > comparableTotal;
     const wasExtraSet = instanceState.currentSets > exercise.defaultSets;
     const canChangeLoad = exercise.anchorSession && profileState.initialized && incrementFor(profileState) > 0;
+    const normalizedTotalLoad = normalizeTotalLoad(profile, profileState.weight, profileState.baseWeight);
 
     historyExercises.push({
       id: exercise.id,
@@ -63,9 +70,20 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
       profileId: profile.id,
       name: profile.name,
       weight: Number(profileState.weight || 0),
+      baseWeight: effectiveBaseWeight(profile, profileState.baseWeight),
+      loadType: profile.loadType,
+      entryMode: profile.entryMode,
+      displayMode: profile.displayMode,
+      normalizedTotalLoad,
       reps,
       totalReps,
-      sets: reps.map((rep, index) => ({ set: index + 1, reps: Number(rep || 0), weight: Number(profileState.weight || 0) })),
+      sets: reps.map((rep, index) => ({
+        set: index + 1,
+        reps: Number(rep || 0),
+        weight: Number(profileState.weight || 0),
+        baseWeight: effectiveBaseWeight(profile, profileState.baseWeight),
+        normalizedTotalLoad,
+      })),
       muscleFactors: profile.muscleFactors,
       kneeSensitive: profile.kneeSensitive,
       hamstringSensitive: profile.hamstringSensitive,
@@ -125,7 +143,7 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
 
   let nextState = {
     ...state,
-    schemaVersion: 2,
+    schemaVersion: 3,
     currentRoutineIndex: (Number(state.currentRoutineIndex || 0) + 1) % ROUTINES.length,
     sessionCount: Number(state.sessionCount || 0) + 1,
     profileData,
@@ -160,9 +178,7 @@ export function applyDeload(rawState) {
 export function shouldAutoDeload(rawState) {
   const state = migrateState(rawState);
   if (Number(state.sessionCount || 0) < 12) return false;
-  const stalled = Object.values(state.instanceData || {}).filter(
-    (data) => Number(data.stagnationCount || 0) >= 2
-  );
+  const stalled = Object.values(state.instanceData || {}).filter((data) => Number(data.stagnationCount || 0) >= 2);
   return stalled.length >= 3;
 }
 
@@ -171,8 +187,9 @@ export function sum(values) {
 }
 
 export function comparableTarget(exercise, state) {
-  const view = instanceView(exercise, state);
-  return Number(view.targetTotal || exercise.defaultSets * exercise.min);
+  const migrated = migrateState(state);
+  const current = migrated.instanceData?.[exercise.id];
+  return Number(current?.targetTotal || exercise.defaultSets * exercise.min);
 }
 
 function incrementFor(profileState) {

@@ -27,6 +27,12 @@ import {
   weightBasisLabel,
 } from "./routines";
 import {
+  formatWeightDisplay,
+  hasAdjustableBaseWeight,
+  normalizeTotalLoad,
+  warmupHelperText,
+} from "./load.js";
+import {
   bodyweightWeeklyAverage,
   complianceSeries,
   dateKey,
@@ -118,7 +124,7 @@ export default function App() {
       }
       const migrated = migrateState(snapshot.data());
       setState(migrated);
-      if (snapshot.data().schemaVersion !== 2) await setDoc(stateRef, migrated);
+      if (snapshot.data().schemaVersion !== 3) await setDoc(stateRef, migrated);
       setStatus("저장됨");
     });
     return unsubscribe;
@@ -518,6 +524,9 @@ function TodayView({ state, currentRoutine, openSections, setOpenSections, onLog
 
 function SessionAccordion({ routine, state, open, current, onToggle, onExerciseTap }) {
   const summary = sessionSummary(routine);
+  const firstExercise = routine.exercises[0];
+  const firstView = firstExercise ? instanceView(firstExercise, state) : null;
+  const warmupText = current && firstView ? warmupHelperText(firstExercise, firstView) : null;
   return (
     <article className={`overflow-hidden rounded-lg border bg-app-card transition ${current ? "border-app-accent" : "border-app-line"}`}>
       <button onClick={onToggle} className="flex w-full items-center justify-between gap-3 p-4 text-left">
@@ -539,6 +548,11 @@ function SessionAccordion({ routine, state, open, current, onToggle, onExerciseT
       </button>
       {open && (
         <div className="space-y-3 border-t border-app-line p-4">
+          {warmupText ? (
+            <div className="rounded-md border border-app-line bg-app-bg px-3 py-2 text-sm text-app-muted">
+              {warmupText}
+            </div>
+          ) : null}
           {routine.exercises.map((exercise) => (
             <button key={exercise.id} onClick={() => onExerciseTap(exercise.id)} className="block w-full text-left">
               <ExerciseCard exercise={exercise} view={instanceView(exercise, state)} />
@@ -867,17 +881,17 @@ function ProgressionCharts({ series }) {
   );
 }
 
-function MiniLineChart({ title, points }) {
+function MiniLineChartLegacy({ title, points }) {
   const recent = points.slice(-8);
   const width = 260;
   const height = 72;
-  const max = Math.max(...recent.map((point) => point.metric || point.weight), 1);
-  const min = Math.min(...recent.map((point) => point.metric || point.weight), 0);
+  const max = Math.max(...recent.map((point) => point.metric || point.normalizedTotalLoad || point.weight), 1);
+  const min = Math.min(...recent.map((point) => point.metric || point.normalizedTotalLoad || point.weight), 0);
   const span = Math.max(1, max - min);
   const path = recent
     .map((point, index) => {
       const x = recent.length === 1 ? width : (index / (recent.length - 1)) * width;
-      const y = height - (((point.metric || point.weight) - min) / span) * (height - 12) - 6;
+      const y = height - (((point.metric || point.normalizedTotalLoad || point.weight) - min) / span) * (height - 12) - 6;
       return `${index === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
     })
     .join(" ");
@@ -896,7 +910,7 @@ function MiniLineChart({ title, points }) {
           <path d={path} fill="none" stroke="#6366f1" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
           {recent.map((point, index) => {
             const x = recent.length === 1 ? width / 2 : (index / (recent.length - 1)) * width;
-            const y = height - (((point.metric || point.weight) - min) / span) * (height - 12) - 6;
+            const y = height - (((point.metric || point.normalizedTotalLoad || point.weight) - min) / span) * (height - 12) - 6;
             return <circle key={`${point.id}-${index}`} cx={x} cy={y} r="4" fill="#10b981" />;
           })}
         </svg>
@@ -1035,7 +1049,7 @@ function ComplianceChart({ rows }) {
   );
 }
 
-function SessionHistoryCard({ session }) {
+function SessionHistoryCardLegacy({ session }) {
   return (
     <div className="rounded-md bg-app-bg p-3">
       <div className="flex items-start justify-between gap-2">
@@ -1072,7 +1086,7 @@ function SessionHistoryCard({ session }) {
   );
 }
 
-function SettingsSessionAccordion({ routine, state, open, onToggle, onProfile }) {
+function SettingsSessionAccordionLegacy({ routine, state, open, onToggle, onProfile }) {
   const summary = sessionSummary(routine);
   return (
     <article className="overflow-hidden rounded-md bg-app-bg">
@@ -1429,7 +1443,7 @@ function recoveryCheckText(profile) {
   return "다음날 회복 상태 확인";
 }
 
-function formatWeight(weight, profile) {
+function formatWeightLegacy(weight, profile) {
   if (profile.isTime || profile.equipment === "bodyweight") return "체중";
   if (profile.equipment === "barbell") return `${Number(weight || 0)}kg / 한쪽`;
   if (profile.equipment === "dumbbell") return `${Number(weight || 0)}kg / 개당`;
@@ -1447,6 +1461,163 @@ function formatDateOnly(value) {
 
 function formatNumber(value) {
   return new Intl.NumberFormat("ko-KR").format(Math.round(Number(value || 0)));
+}
+
+function MiniLineChart({ title, points }) {
+  const recent = points.slice(-8);
+  const width = 260;
+  const height = 72;
+  const max = Math.max(...recent.map((point) => point.metric || point.normalizedTotalLoad || point.weight), 1);
+  const min = Math.min(...recent.map((point) => point.metric || point.normalizedTotalLoad || point.weight), 0);
+  const span = Math.max(1, max - min);
+  const path = recent
+    .map((point, index) => {
+      const x = recent.length === 1 ? width : (index / (recent.length - 1)) * width;
+      const y = height - (((point.metric || point.normalizedTotalLoad || point.weight) - min) / span) * (height - 12) - 6;
+      return `${index === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
+    })
+    .join(" ");
+  const latest = recent[recent.length - 1];
+
+  return (
+    <div className="rounded-md bg-app-bg p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-sm font-bold text-white">{title}</span>
+        <span className="text-xs text-app-muted">{latest ? `${latest.metricLabel} ${latest.metric} · ${latest.displayWeightText} · ${latest.totalReps}회` : "기록 없음"}</span>
+      </div>
+      {recent.length ? (
+        <svg viewBox={`0 0 ${width} ${height}`} className="h-20 w-full overflow-visible">
+          <path d={path} fill="none" stroke="#6366f1" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+          {recent.map((point, index) => {
+            const x = recent.length === 1 ? width / 2 : (index / (recent.length - 1)) * width;
+            const y = height - (((point.metric || point.normalizedTotalLoad || point.weight) - min) / span) * (height - 12) - 6;
+            return <circle key={`${point.id}-${index}`} cx={x} cy={y} r="4" fill="#10b981" />;
+          })}
+        </svg>
+      ) : (
+        <p className="py-5 text-center text-sm text-app-muted">기록 없음</p>
+      )}
+    </div>
+  );
+}
+
+function SettingsSessionAccordion({ routine, state, open, onToggle, onProfile }) {
+  const summary = sessionSummary(routine);
+  return (
+    <article className="overflow-hidden rounded-md bg-app-bg">
+      <button onClick={onToggle} className="flex w-full items-center justify-between gap-3 p-3 text-left">
+        <div>
+          <div className="flex items-center gap-2">
+            <h3 className="font-black text-white">{routine.name}</h3>
+            <span className="rounded-md bg-app-card px-2 py-1 text-xs text-app-muted">{routine.day}</span>
+            {summary.hasKneeSensitive && <Badge amber>무릎</Badge>}
+            {summary.hasHamstringSensitive && <Badge rose>햄스트링</Badge>}
+          </div>
+          <p className="mt-1 text-xs text-app-muted">
+            {summary.exerciseCount}종목 · {summary.totalSets}세트
+          </p>
+        </div>
+        <ChevronDown className={`h-5 w-5 text-app-muted transition ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="space-y-2 border-t border-app-line p-3">
+          {routine.exercises.map((exercise) => {
+            const profile = profileById(exercise.profileId);
+            const data = state.profileData[profile.id] || {};
+            const sharedCount = ROUTINES.flatMap((item) => item.exercises).filter((item) => item.profileId === profile.id).length;
+            return (
+              <div key={exercise.id} className="rounded-md bg-[#0f0f16] p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <span>
+                    <span className="block text-sm font-semibold text-white">{profile.name}</span>
+                    <span className="text-xs text-app-muted">
+                      {profile.displayNote || weightBasisLabel(profile)}
+                      {sharedCount > 1 ? ` · ${sharedCount}세션 공유` : ""}
+                      {exercise.anchorSession ? " · 앵커" : " · 공유만"}
+                    </span>
+                  </span>
+                  {profile.kneeSensitive && <Badge amber>무릎</Badge>}
+                  {profile.hamstringSensitive && <Badge rose>햄스트링</Badge>}
+                </div>
+                <div className={`mt-3 grid gap-2 ${hasAdjustableBaseWeight(profile) ? "grid-cols-3" : "grid-cols-2"}`}>
+                  <NumberField
+                    label="입력 중량"
+                    value={data.weight || ""}
+                    disabled={profile.isTime}
+                    onChange={(value) => onProfile(profile.id, { weight: Number(value || 0), initialized: Number(value) > 0 || profile.isTime })}
+                  />
+                  <NumberField
+                    label="증량폭"
+                    value={data.incrementStep ?? profile.defaultIncrement}
+                    disabled={profile.isTime}
+                    onChange={(value) => onProfile(profile.id, { incrementStep: Math.max(0, Number(value || 0)) })}
+                  />
+                  {hasAdjustableBaseWeight(profile) ? (
+                    <NumberField
+                      label="바/기구"
+                      value={data.baseWeight ?? profile.baseWeight ?? 0}
+                      disabled={profile.isTime}
+                      onChange={(value) => onProfile(profile.id, { baseWeight: Math.max(0, Number(value || 0)) })}
+                    />
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </article>
+  );
+}
+
+function SessionHistoryCard({ session }) {
+  return (
+    <div className="rounded-md bg-app-bg p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h3 className="font-bold text-white">{session.routine}</h3>
+          <p className="mt-1 text-xs text-app-muted">{formatDate(session.date)}</p>
+        </div>
+        <span className="text-sm font-bold text-white">{formatNumber(sessionVolume(session))}</span>
+      </div>
+      {session.notes ? <p className="mt-3 rounded-md bg-app-card px-3 py-2 text-sm text-app-muted">{session.notes}</p> : null}
+      {session.recoveryConfirmations || session.kneeConfirmations ? (
+        <div className="mt-3 rounded-md bg-app-card px-3 py-2 text-xs text-app-muted">
+          {Object.values(session.recoveryConfirmations || session.kneeConfirmations || {}).map((item, index) => (
+            <span key={index} className="mr-2">
+              {item.type === "hamstring" ? "햄스트링" : "무릎"} {item.clean ? "문제 없음" : "불편함"}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <div className="mt-3 space-y-2">
+        {(session.exercises || []).map((exercise) => {
+          const profile = profileById(exercise.profileId);
+          const setLine =
+            (exercise.sets || [])
+              .map((set) => `${formatWeightDisplay(set.weight, profile, { baseWeight: set.baseWeight ?? exercise.baseWeight ?? profile?.baseWeight })} x ${set.reps}`)
+              .join(" / ") ||
+            `${formatWeightDisplay(exercise.weight, profile, { baseWeight: exercise.baseWeight ?? profile?.baseWeight })} · ${exercise.reps?.join(", ") || ""}`;
+          return (
+            <div key={exercise.id} className="rounded-md bg-app-card px-3 py-2 text-sm">
+              <div className="flex justify-between gap-2">
+                <span className="font-semibold text-white">{exercise.name}</span>
+                <span className="text-app-muted">{exercise.totalReps}</span>
+              </div>
+              <p className="mt-1 text-app-muted">{setLine}</p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function formatWeight(weight, profile) {
+  return formatWeightDisplay(weight, profile, {
+    baseWeight: profile.baseWeight,
+    includeTotal: profile.displayMode === "per_side_plus_bar" || profile.displayMode === "per_side" || profile.displayMode === "per_hand",
+  });
 }
 
 function makeRecoveryCode() {

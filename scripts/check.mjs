@@ -5,9 +5,9 @@ import {
   adherenceRate,
   bodyweightWeeklyAverage,
   plateauRecommendations,
+  progressionSeries,
   weeklyDirectHardSets,
   weeklyMuscleVolume,
-  progressionSeries,
 } from "../src/analytics.js";
 import { completeSession } from "../src/progression.js";
 import { ROUTINES, createInitialState, migrateState, profileById } from "../src/routines.js";
@@ -18,6 +18,9 @@ parse(fs.readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8"), {
 });
 
 assert.equal(profileById("seated_db_shoulder_press").name, "시티드 덤벨 숄더프레스");
+assert.equal(profileById("leg_extension").loadType, "stack_weight");
+assert.equal(profileById("smith_hip_thrust").loadType, "smith_total");
+assert.equal(profileById("incline_bench_chest_supported_db_row").entryMode, "per_hand");
 
 const initial = createInitialState();
 const b2Entries = Object.fromEntries(ROUTINES[3].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.max)]));
@@ -30,6 +33,7 @@ const a1Entries = Object.fromEntries(ROUTINES[0].exercises.map((exercise) => [ex
 const a1Result = completeSession(initial, ROUTINES[0], a1Entries, {});
 assert.equal(a1Result.nextState.profileData.lat_pulldown.weight, 47.5, "A1 lat pulldown anchor should progress shared load");
 assert.equal(a1Result.nextState.profileData.leg_press.kneeCheckPending, true, "Leg press should wait for knee confirmation");
+assert.equal(a1Result.historyExercises[0].normalizedTotalLoad, 50, "Bench 15kg/side + 20kg bar should normalize to 50kg");
 
 const hamstringInitial = createInitialState();
 hamstringInitial.profileData.leg_curl.weight = 30;
@@ -42,9 +46,11 @@ assert.equal(b1Result.nextState.profileData.leg_curl.recoveryCheckPending, true)
 const legacy = migrateState({
   exerciseData: {
     shoulder_press: { weight: 12.5, initialized: true, currentSets: 3, targetTotal: 25 },
+    hip_thrust: { weight: 40, initialized: true, currentSets: 3, targetTotal: 25 },
   },
 });
 assert.equal(legacy.profileData.seated_db_shoulder_press.weight, 12.5);
+assert.equal(legacy.profileData.smith_hip_thrust.weight, 40);
 
 const history = [
   {
@@ -54,13 +60,17 @@ const history = [
     exercises: [{ id: "bench_press", profileId: "bench_press", weight: 50, totalReps: 30, reps: [10, 10, 10] }],
   },
 ];
-assert.equal(weeklyMuscleVolume(history, 2).at(-1).muscles.chest, 1500);
+assert.equal(weeklyMuscleVolume(history, 2).at(-1).muscles.chest, 3600);
 assert.equal(progressionSeries(history, ["bench_press"])[0].points[0].metricLabel, "e1RM");
+assert.equal(progressionSeries(history, ["bench_press"])[0].points[0].normalizedTotalLoad, 120);
 assert.equal(
-  bodyweightWeeklyAverage([
-    { date: new Date(), value: 80, context: "post_workout" },
-    { date: new Date(), value: 81, context: "morning_fasted" },
-  ], 1)[0].average,
+  bodyweightWeeklyAverage(
+    [
+      { date: new Date(), value: 80, context: "post_workout" },
+      { date: new Date(), value: 81, context: "morning_fasted" },
+    ],
+    1
+  )[0].average,
   81
 );
 assert.equal(bodyweightWeeklyAverage([{ date: new Date(), value: 80, context: "post_workout" }], 1)[0].confidence, "fallback");

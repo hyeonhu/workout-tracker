@@ -1,3 +1,5 @@
+import { effectiveBaseWeight, normalizeTotalLoad, weightBasisLabel as loadWeightBasisLabel } from "./load.js";
+
 export const CATEGORY_META = {
   upper_main: { label: "상체 메인", color: "#3b82f6" },
   posterior: { label: "후면사슬", color: "#a855f7" },
@@ -19,88 +21,204 @@ export const MUSCLE_GROUPS = [
 ];
 
 export const EXERCISE_PROFILES = {
-  bench_press: profile("bench_press", "벤치프레스", "upper_main", "barbell", 2.5, 50, {
-    chest: 1,
-    triceps: 0.45,
+  bench_press: profile("bench_press", "벤치프레스", "upper_main", {
+    loadType: "barbell_total",
+    entryMode: "per_side_plus_bar",
+    displayMode: "per_side_plus_bar",
+    defaultIncrement: 2.5,
+    defaultWeight: 15,
+    baseWeight: 20,
+    baseWeightEditable: true,
+    muscleFactors: { chest: 1, triceps: 0.45 },
   }),
-  lat_pulldown: profile("lat_pulldown", "랫풀다운", "upper_main", "machine", 2.5, 45, {
-    back: 1,
-    biceps: 0.35,
+  lat_pulldown: profile("lat_pulldown", "랫풀다운", "upper_main", {
+    loadType: "stack_weight",
+    entryMode: "stack",
+    displayMode: "stack",
+    defaultIncrement: 2.5,
+    defaultWeight: 45,
+    muscleFactors: { back: 1, biceps: 0.35 },
   }),
-  incline_db_press: profile("incline_db_press", "인클라인 덤벨프레스", "upper_main", "dumbbell", 1, 0, {
-    chest: 0.9,
-    triceps: 0.35,
+  incline_db_press: profile("incline_db_press", "인클라인 덤벨프레스", "upper_main", {
+    loadType: "dumbbell_each_hand",
+    entryMode: "per_hand",
+    displayMode: "per_hand",
+    defaultIncrement: 1,
+    defaultWeight: 0,
+    muscleFactors: { chest: 0.9, triceps: 0.35 },
   }),
-  leg_press: profile("leg_press", "레그프레스", "knee_sensitive", "machine_side", 2.5, 50, {
-    quads: 1,
-    hamstrings_glutes: 0.35,
-  }, { kneeSensitive: true, displayNote: "머신 한쪽 50kg 기준" }),
-  lateral_raise: profile("lateral_raise", "사이드 레터럴 레이즈", "isolation", "dumbbell", 1, 0, {
-    lateral_delts: 1,
+  leg_press: profile("leg_press", "레그프레스", "knee_sensitive", {
+    loadType: "plate_per_side",
+    entryMode: "per_side",
+    displayMode: "per_side",
+    defaultIncrement: 2.5,
+    defaultWeight: 50,
+    muscleFactors: { quads: 1, hamstrings_glutes: 0.35 },
+    kneeSensitive: true,
   }),
-  cable_crunch: profile("cable_crunch", "케이블 크런치", "isolation", "machine", 2.5, 0, {
-    core: 1,
+  lateral_raise: profile("lateral_raise", "사이드 레터럴 레이즈", "isolation", {
+    loadType: "dumbbell_each_hand",
+    entryMode: "per_hand",
+    displayMode: "per_hand",
+    defaultIncrement: 1,
+    defaultWeight: 0,
+    muscleFactors: { lateral_delts: 1 },
   }),
-  romanian_deadlift: profile("romanian_deadlift", "루마니안 데드리프트", "posterior", "barbell", 2.5, 0, {
-    hamstrings_glutes: 1,
-    back: 0.25,
+  cable_crunch: profile("cable_crunch", "케이블 크런치", "isolation", {
+    loadType: "stack_weight",
+    entryMode: "stack",
+    displayMode: "stack",
+    defaultIncrement: 2.5,
+    defaultWeight: 0,
+    muscleFactors: { core: 1 },
   }),
-  seated_db_shoulder_press: profile("seated_db_shoulder_press", "시티드 덤벨 숄더프레스", "upper_main", "dumbbell", 1, 12.5, {
-    lateral_delts: 0.75,
-    triceps: 0.45,
-  }, { displayNote: "덤벨 개당 12.5kg 기준" }),
-  seated_cable_row: profile("seated_cable_row", "시티드 케이블 로우", "upper_main", "machine", 2.5, 45, {
-    back: 1,
-    biceps: 0.3,
-    rear_delts: 0.25,
+  romanian_deadlift: profile("romanian_deadlift", "루마니안 데드리프트", "posterior", {
+    loadType: "barbell_total",
+    entryMode: "per_side_plus_bar",
+    displayMode: "per_side_plus_bar",
+    defaultIncrement: 2.5,
+    defaultWeight: 0,
+    baseWeight: 20,
+    baseWeightEditable: true,
+    muscleFactors: { hamstrings_glutes: 1, back: 0.25 },
   }),
-  leg_curl: profile("leg_curl", "레그컬", "hamstring_sensitive", "machine", 2.5, 0, {
-    hamstrings_glutes: 1,
-  }, { hamstringSensitive: true }),
-  triceps_pushdown: profile("triceps_pushdown", "트라이셉스 푸쉬다운", "isolation", "machine", 2.5, 0, {
-    triceps: 1,
+  seated_db_shoulder_press: profile("seated_db_shoulder_press", "시티드 덤벨 숄더프레스", "upper_main", {
+    loadType: "dumbbell_each_hand",
+    entryMode: "per_hand",
+    displayMode: "per_hand",
+    defaultIncrement: 1,
+    defaultWeight: 12.5,
+    muscleFactors: { lateral_delts: 0.75, triceps: 0.45 },
   }),
-  ez_bar_curl: profile("ez_bar_curl", "EZ바 컬", "isolation", "machine", 2.5, 0, {
-    biceps: 1,
+  seated_cable_row: profile("seated_cable_row", "시티드 케이블 로우", "upper_main", {
+    loadType: "stack_weight",
+    entryMode: "stack",
+    displayMode: "stack",
+    defaultIncrement: 2.5,
+    defaultWeight: 45,
+    muscleFactors: { back: 1, biceps: 0.3, rear_delts: 0.25 },
   }),
-  face_pull: profile("face_pull", "페이스풀", "isolation", "machine", 2.5, 0, {
-    rear_delts: 1,
-    back: 0.25,
+  leg_curl: profile("leg_curl", "레그컬", "hamstring_sensitive", {
+    loadType: "stack_weight",
+    entryMode: "stack",
+    displayMode: "stack",
+    defaultIncrement: 2.5,
+    defaultWeight: 0,
+    muscleFactors: { hamstrings_glutes: 1 },
+    hamstringSensitive: true,
   }),
-  incline_bench_press: profile("incline_bench_press", "인클라인 벤치프레스", "upper_main", "barbell", 2.5, 0, {
-    chest: 1,
-    triceps: 0.4,
+  triceps_pushdown: profile("triceps_pushdown", "트라이셉스 푸쉬다운", "isolation", {
+    loadType: "stack_weight",
+    entryMode: "stack",
+    displayMode: "stack",
+    defaultIncrement: 2.5,
+    defaultWeight: 0,
+    muscleFactors: { triceps: 1 },
   }),
-  neutral_lat_pulldown: profile("neutral_lat_pulldown", "뉴트럴그립 랫풀다운", "upper_main", "machine", 2.5, 0, {
-    back: 1,
-    biceps: 0.35,
+  ez_bar_curl: profile("ez_bar_curl", "EZ바 컬", "isolation", {
+    loadType: "barbell_total",
+    entryMode: "per_side_plus_bar",
+    displayMode: "per_side_plus_bar",
+    defaultIncrement: 1.25,
+    defaultWeight: 0,
+    baseWeight: 10,
+    baseWeightEditable: true,
+    muscleFactors: { biceps: 1 },
   }),
-  cable_fly: profile("cable_fly", "케이블 플라이", "isolation", "machine", 2.5, 0, {
-    chest: 1,
+  face_pull: profile("face_pull", "페이스풀", "isolation", {
+    loadType: "stack_weight",
+    entryMode: "stack",
+    displayMode: "stack",
+    defaultIncrement: 2.5,
+    defaultWeight: 0,
+    muscleFactors: { rear_delts: 1, back: 0.25 },
   }),
-  leg_extension: profile("leg_extension", "레그 익스텐션", "knee_sensitive", "machine", 2.5, 0, {
-    quads: 1,
-  }, { kneeSensitive: true }),
-  reverse_crunch: profile("reverse_crunch", "리버스 크런치", "isolation", "bodyweight", 0, 0, {
-    core: 1,
+  incline_bench_press: profile("incline_bench_press", "인클라인 벤치프레스", "upper_main", {
+    loadType: "barbell_total",
+    entryMode: "per_side_plus_bar",
+    displayMode: "per_side_plus_bar",
+    defaultIncrement: 2.5,
+    defaultWeight: 0,
+    baseWeight: 20,
+    baseWeightEditable: true,
+    muscleFactors: { chest: 1, triceps: 0.4 },
   }),
-  hip_thrust: profile("hip_thrust", "힙쓰러스트", "posterior", "machine", 2.5, 0, {
-    hamstrings_glutes: 1,
+  neutral_lat_pulldown: profile("neutral_lat_pulldown", "뉴트럴그립 랫풀다운", "upper_main", {
+    loadType: "stack_weight",
+    entryMode: "stack",
+    displayMode: "stack",
+    defaultIncrement: 2.5,
+    defaultWeight: 0,
+    muscleFactors: { back: 1, biceps: 0.35 },
   }),
-  chest_supported_row: profile("chest_supported_row", "체스트 서포티드 로우", "upper_main", "machine", 2.5, 0, {
-    back: 1,
-    rear_delts: 0.25,
-    biceps: 0.3,
+  cable_fly: profile("cable_fly", "케이블 플라이", "isolation", {
+    loadType: "stack_weight",
+    entryMode: "stack",
+    displayMode: "stack",
+    defaultIncrement: 2.5,
+    defaultWeight: 0,
+    muscleFactors: { chest: 1 },
   }),
-  hammer_curl: profile("hammer_curl", "해머 컬", "isolation", "dumbbell", 1, 0, {
-    biceps: 1,
+  leg_extension: profile("leg_extension", "레그 익스텐션", "knee_sensitive", {
+    loadType: "stack_weight",
+    entryMode: "stack",
+    displayMode: "stack",
+    defaultIncrement: 2.5,
+    defaultWeight: 0,
+    muscleFactors: { quads: 1 },
+    kneeSensitive: true,
   }),
-  overhead_triceps_extension: profile("overhead_triceps_extension", "오버헤드 트라이셉스 익스텐션", "isolation", "machine", 2.5, 0, {
-    triceps: 1,
+  reverse_crunch: profile("reverse_crunch", "리버스 크런치", "isolation", {
+    loadType: "bodyweight_progression",
+    entryMode: "bodyweight",
+    displayMode: "bodyweight",
+    defaultIncrement: 0,
+    defaultWeight: 0,
+    muscleFactors: { core: 1 },
   }),
-  plank: profile("plank", "플랭크", "isolation", "bodyweight", 0, 0, {
-    core: 1,
-  }, { isTime: true }),
+  smith_hip_thrust: profile("smith_hip_thrust", "스미스 힙쓰러스트", "posterior", {
+    loadType: "smith_total",
+    entryMode: "per_side_plus_bar",
+    displayMode: "per_side_plus_bar",
+    defaultIncrement: 2.5,
+    defaultWeight: 0,
+    baseWeight: 20,
+    baseWeightEditable: true,
+    muscleFactors: { hamstrings_glutes: 1 },
+  }),
+  incline_bench_chest_supported_db_row: profile("incline_bench_chest_supported_db_row", "인클라인 벤치 체서 덤벨 로우", "upper_main", {
+    loadType: "dumbbell_each_hand",
+    entryMode: "per_hand",
+    displayMode: "per_hand",
+    defaultIncrement: 1,
+    defaultWeight: 0,
+    muscleFactors: { back: 1, rear_delts: 0.25, biceps: 0.3 },
+  }),
+  hammer_curl: profile("hammer_curl", "해머 컬", "isolation", {
+    loadType: "dumbbell_each_hand",
+    entryMode: "per_hand",
+    displayMode: "per_hand",
+    defaultIncrement: 1,
+    defaultWeight: 0,
+    muscleFactors: { biceps: 1 },
+  }),
+  overhead_triceps_extension: profile("overhead_triceps_extension", "오버헤드 트라이셉스 익스텐션", "isolation", {
+    loadType: "stack_weight",
+    entryMode: "stack",
+    displayMode: "stack",
+    defaultIncrement: 2.5,
+    defaultWeight: 0,
+    muscleFactors: { triceps: 1 },
+  }),
+  plank: profile("plank", "플랭크", "isolation", {
+    loadType: "bodyweight_progression",
+    entryMode: "bodyweight",
+    displayMode: "bodyweight",
+    defaultIncrement: 0,
+    defaultWeight: 0,
+    muscleFactors: { core: 1 },
+    isTime: true,
+  }),
 };
 
 export const ROUTINES = [
@@ -131,8 +249,8 @@ export const ROUTINES = [
     inst("a2_reverse_crunch", "reverse_crunch", 3, 10, 15, true),
   ]),
   session("b2", "B2", "금", "등 보강 + 둔근/햄 + 팔", [
-    inst("b2_hip_thrust", "hip_thrust", 3, 8, 12, true),
-    inst("b2_chest_supported_row", "chest_supported_row", 3, 8, 12, true),
+    inst("b2_hip_thrust", "smith_hip_thrust", 3, 8, 12, true),
+    inst("b2_chest_supported_row", "incline_bench_chest_supported_db_row", 3, 8, 12, true),
     inst("b2_lat_pulldown", "lat_pulldown", 2, 10, 12, false),
     inst("b2_leg_curl", "leg_curl", 2, 10, 15, false),
     inst("b2_hammer_curl", "hammer_curl", 2, 10, 15, true),
@@ -151,8 +269,14 @@ export const ANCHOR_PROFILE_IDS = [
   "lat_pulldown",
   "leg_press",
   "romanian_deadlift",
-  "hip_thrust",
+  "smith_hip_thrust",
 ];
+
+const LEGACY_PROFILE_ALIASES = {
+  shoulder_press: "seated_db_shoulder_press",
+  hip_thrust: "smith_hip_thrust",
+  chest_supported_row: "incline_bench_chest_supported_db_row",
+};
 
 export function createInitialProfileData() {
   return Object.fromEntries(
@@ -160,6 +284,7 @@ export function createInitialProfileData() {
       profileItem.id,
       {
         weight: profileItem.defaultWeight,
+        baseWeight: profileItem.baseWeight,
         incrementStep: profileItem.defaultIncrement,
         initialized: profileItem.defaultWeight > 0 || profileItem.isTime,
         kneeCheckPending: false,
@@ -186,7 +311,7 @@ export function createInitialInstanceData() {
 
 export function createInitialState() {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     currentRoutineIndex: 0,
     sessionCount: 0,
     profileData: createInitialProfileData(),
@@ -203,11 +328,13 @@ export function migrateState(rawState) {
   const migrated = {
     ...base,
     ...rawState,
-    schemaVersion: 2,
+    schemaVersion: 3,
     profileData: { ...base.profileData, ...(rawState.profileData || {}) },
     instanceData: { ...base.instanceData, ...(rawState.instanceData || {}) },
     recommendationCooldowns: { ...base.recommendationCooldowns, ...(rawState.recommendationCooldowns || {}) },
   };
+
+  migrateLegacyProfileAliases(migrated.profileData);
 
   if (rawState.exerciseData && !rawState.profileData) {
     for (const exercise of SESSION_EXERCISES) {
@@ -226,7 +353,13 @@ export function migrateState(rawState) {
         incrementStep: Number(old.incrementStep ?? migrated.profileData[exercise.profileId].incrementStep ?? defaultIncrementFor(profileById(exercise.profileId))),
         initialized: Boolean(old.initialized || migrated.profileData[exercise.profileId].initialized),
         kneeCheckPending: Boolean(old.kneeCheckPending || migrated.profileData[exercise.profileId].kneeCheckPending),
-        recoveryCheckPending: Boolean(old.kneeCheckPending || migrated.profileData[exercise.profileId].recoveryCheckPending),
+        hamstringCheckPending: Boolean(old.hamstringCheckPending || migrated.profileData[exercise.profileId].hamstringCheckPending),
+        recoveryCheckPending: Boolean(
+          old.recoveryCheckPending ||
+            old.kneeCheckPending ||
+            old.hamstringCheckPending ||
+            migrated.profileData[exercise.profileId].recoveryCheckPending
+        ),
       };
     }
   }
@@ -236,6 +369,9 @@ export function migrateState(rawState) {
     migrated.profileData[profileItem.id] = {
       ...base.profileData[profileItem.id],
       ...current,
+      baseWeight: Number(current.baseWeight ?? base.profileData[profileItem.id].baseWeight ?? profileItem.baseWeight ?? 0),
+      incrementStep: Number(current.incrementStep ?? base.profileData[profileItem.id].incrementStep ?? profileItem.defaultIncrement ?? 0),
+      initialized: Boolean(current.initialized || base.profileData[profileItem.id].initialized || profileItem.isTime),
       recoveryCheckPending: Boolean(current.recoveryCheckPending || current.kneeCheckPending || current.hamstringCheckPending),
       kneeCheckPending: Boolean(current.kneeCheckPending),
       hamstringCheckPending: Boolean(current.hamstringCheckPending),
@@ -246,7 +382,7 @@ export function migrateState(rawState) {
 }
 
 export function profileById(profileId) {
-  return EXERCISE_PROFILES[profileId];
+  return EXERCISE_PROFILES[LEGACY_PROFILE_ALIASES[profileId] || profileId];
 }
 
 export function instanceById(instanceId) {
@@ -256,6 +392,7 @@ export function instanceById(instanceId) {
 export function instanceView(exercise, state) {
   const migrated = migrateState(state);
   const profileItem = profileById(exercise.profileId);
+  const profileState = migrated.profileData[profileItem.id];
   return {
     ...exercise,
     ...profileItem,
@@ -263,7 +400,9 @@ export function instanceView(exercise, state) {
     profileId: profileItem.id,
     profileName: profileItem.name,
     ...migrated.instanceData[exercise.id],
-    ...migrated.profileData[profileItem.id],
+    ...profileState,
+    baseWeight: effectiveBaseWeight(profileItem, profileState?.baseWeight),
+    normalizedTotalLoad: normalizeTotalLoad(profileItem, profileState?.weight, profileState?.baseWeight),
   };
 }
 
@@ -280,22 +419,29 @@ export function defaultIncrementFor(profileItem) {
 }
 
 export function weightBasisLabel(profileItem) {
-  if (profileItem.equipment === "barbell") return "한쪽 원판 기준";
-  if (profileItem.equipment === "dumbbell") return "덤벨 개당 기준";
-  if (profileItem.equipment === "machine_side") return "머신 한쪽 기준";
-  if (profileItem.equipment === "bodyweight") return "시간/체중";
-  return "머신 표시 기준";
+  return loadWeightBasisLabel(profileItem);
 }
 
-function profile(id, name, category, equipment, defaultIncrement, defaultWeight, muscleFactors, options = {}) {
+function migrateLegacyProfileAliases(profileData) {
+  for (const [legacyId, nextId] of Object.entries(LEGACY_PROFILE_ALIASES)) {
+    if (!profileData[legacyId] || profileData[nextId]) continue;
+    profileData[nextId] = { ...profileData[legacyId] };
+  }
+}
+
+function profile(id, name, category, options) {
   return {
     id,
     name,
     category,
-    equipment,
-    defaultIncrement,
-    defaultWeight,
-    muscleFactors,
+    loadType: options.loadType,
+    entryMode: options.entryMode,
+    displayMode: options.displayMode,
+    defaultIncrement: options.defaultIncrement,
+    defaultWeight: options.defaultWeight,
+    baseWeight: Number(options.baseWeight || 0),
+    baseWeightEditable: Boolean(options.baseWeightEditable),
+    muscleFactors: options.muscleFactors,
     kneeSensitive: Boolean(options.kneeSensitive),
     hamstringSensitive: Boolean(options.hamstringSensitive),
     isTime: Boolean(options.isTime),

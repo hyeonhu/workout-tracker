@@ -1,3 +1,4 @@
+import { displayMetricWeight, formatWeightDisplay, normalizeLoggedLoad } from "./load.js";
 import { ANCHOR_PROFILE_IDS, MUSCLE_GROUPS, profileById } from "./routines.js";
 
 const E1RM_PROFILE_IDS = new Set(["bench_press", "seated_db_shoulder_press", "romanian_deadlift"]);
@@ -21,7 +22,7 @@ export function weeklyMuscleVolume(history, weeks = 10) {
       const profileId = normalizeProfileId(exercise);
       const profile = profileById(profileId) || {};
       const factors = exercise.muscleFactors || profile.muscleFactors || {};
-      const load = Number(exercise.weight || 0) || (profile.isTime ? 1 : 0);
+      const load = normalizeLoggedLoad(exercise, profile) || (profile.isTime ? 1 : 0);
       const total = Number(exercise.totalReps || 0);
       for (const [muscleId, factor] of Object.entries(factors)) {
         row.muscles[muscleId] += load * total * Number(factor || 0);
@@ -37,22 +38,30 @@ export function progressionSeries(history, profileIds = ANCHOR_PROFILE_IDS) {
   return profileIds.map((profileId) => {
     const profile = profileById(profileId);
     const points = [];
+
     for (const session of sorted) {
       const matches = (session.exercises || []).filter((exercise) => normalizeProfileId(exercise) === profileId);
       for (const exercise of matches) {
-        const weight = Number(exercise.weight || 0);
+        const rawWeight = Number(exercise.weight || 0);
+        const normalizedLoad = displayMetricWeight(profile, exercise);
         const topSet = Math.max(...(exercise.reps || [0]).map((rep) => Number(rep || 0)));
         const workSets = (exercise.reps || []).length;
-        const profile = profileById(profileId);
         const topTarget = profileId === "leg_press" ? 15 : profileId === "lat_pulldown" ? 12 : 12;
+        const useE1rm = E1RM_PROFILE_IDS.has(profileId);
+
         points.push({
           id: `${session.id}-${exercise.id}-${points.length}`,
           date: toDate(exercise.date || session.date),
           label: shortDate(toDate(session.date)),
-          weight,
-          displayWeight: weight,
-          metric: E1RM_PROFILE_IDS.has(profileId) ? estimateE1rm(displayLoad(profileId, weight), topSet) : weight,
-          metricLabel: E1RM_PROFILE_IDS.has(profileId) ? "e1RM" : "작업중량",
+          weight: rawWeight,
+          displayWeight: rawWeight,
+          normalizedTotalLoad: normalizedLoad,
+          displayWeightText: formatWeightDisplay(rawWeight, profile, {
+            baseWeight: exercise.baseWeight ?? profile.baseWeight,
+            includeTotal: profile.displayMode === "per_side_plus_bar" || profile.displayMode === "per_side" || profile.displayMode === "per_hand",
+          }),
+          metric: useE1rm ? estimateE1rm(normalizedLoad, topSet) : normalizedLoad,
+          metricLabel: useE1rm ? "e1RM" : "총중량",
           totalReps: Number(exercise.totalReps || 0),
           repCompletion: workSets ? Math.round((Number(exercise.totalReps || 0) / (workSets * topTarget)) * 100) : 0,
           workSets,
@@ -61,13 +70,22 @@ export function progressionSeries(history, profileIds = ANCHOR_PROFILE_IDS) {
         });
       }
     }
+
     return { profileId, name: profile?.name || profileId, points };
   });
 }
 
 export function bodyweightWeeklyAverage(bodyweightLogs, weeks = 10) {
-  const rows = recentWeekKeys(weeks).map((week) => ({ week, label: weekLabel(week), values: [], morningValues: [], average: 0, confidence: "none" }));
+  const rows = recentWeekKeys(weeks).map((week) => ({
+    week,
+    label: weekLabel(week),
+    values: [],
+    morningValues: [],
+    average: 0,
+    confidence: "none",
+  }));
   const byWeek = Object.fromEntries(rows.map((row) => [row.week, row]));
+
   for (const log of bodyweightLogs || []) {
     const key = weekKey(toDate(log.date || log.createdAt || log.completedAtLocal));
     if (!byWeek[key]) continue;
@@ -76,6 +94,7 @@ export function bodyweightWeeklyAverage(bodyweightLogs, weeks = 10) {
     byWeek[key].values.push(value);
     if ((log.context || "other") === "morning_fasted") byWeek[key].morningValues.push(value);
   }
+
   return rows.map((row) => {
     const preferred = row.morningValues.length ? row.morningValues : row.values;
     return {
@@ -104,6 +123,7 @@ export function weeklyDirectHardSets(history, weeks = 4) {
     muscles: Object.fromEntries(MUSCLE_GROUPS.map((muscle) => [muscle.id, 0])),
   }));
   const byWeek = Object.fromEntries(rows.map((row) => [row.week, row]));
+
   for (const session of history || []) {
     const row = byWeek[weekKey(toDate(session.date))];
     if (!row) continue;
@@ -113,6 +133,7 @@ export function weeklyDirectHardSets(history, weeks = 4) {
       for (const muscleId of directMusclesFor(profileId)) row.muscles[muscleId] += setCount;
     }
   }
+
   return rows;
 }
 
@@ -141,8 +162,8 @@ export function plateauRecommendations(history, bodyweightLogs, weeks = 4, coold
   const plateaued = series.filter((item) => {
     const recent = item.points.filter((point) => daysAgo(point.date) <= weeks * 7);
     if (recent.length < 3) return false;
-    const first = recent[0].metric || recent[0].weight;
-    const last = recent[recent.length - 1].metric || recent[recent.length - 1].weight;
+    const first = recent[0].metric || recent[0].normalizedTotalLoad;
+    const last = recent[recent.length - 1].metric || recent[recent.length - 1].normalizedTotalLoad;
     if (!first) return false;
     return Math.abs((last - first) / first) < 0.02;
   });
@@ -155,7 +176,7 @@ export function plateauRecommendations(history, bodyweightLogs, weeks = 4, coold
       type: "global",
       key: "global_plateau",
       title: "전반적인 정체",
-      text: "여러 주요 운동이 같이 정체되어 보여요. 세트 추가보다 디로드 또는 식단/회복 점검이 더 적절할 수 있어요.",
+      text: "여러 주요 운동이 같이 정체로 보여요. 세트 추가보다 디로드나 식단/회복 점검이 더 적절할 수 있어요.",
     };
     return isSuppressed(rec.key, cooldowns) ? [] : [rec];
   }
@@ -172,7 +193,7 @@ export function plateauRecommendations(history, bodyweightLogs, weeks = 4, coold
         title: `${item.name} 정체`,
         text: sensitive
           ? "민감 부위라 세트 추가보다 같은 중량으로 1주 더 관찰하거나 증량을 보류해보세요."
-          : "이 부위 볼륨이 정체 상태예요. 세트 1~2개 추가를 고려할까요?",
+          : "최근 4주간 이 부위 진행이 둔화됐어요. 세트 1~2개 추가를 고려할까요?",
       });
     }
   }
@@ -191,20 +212,23 @@ export function complianceSeries(history, weeks = 10) {
 export function sessionVolume(session) {
   return (session.exercises || []).reduce((acc, exercise) => {
     const profile = profileById(normalizeProfileId(exercise)) || {};
-    const load = Number(exercise.weight || 0) || (profile.isTime ? 1 : 0);
+    const load = normalizeLoggedLoad(exercise, profile) || (profile.isTime ? 1 : 0);
     return acc + load * Number(exercise.totalReps || 0);
   }, 0);
 }
 
-function normalizeProfileId(exercise) {
+export function normalizeProfileId(exercise) {
+  const id = exercise?.profileId || exercise?.groupId || exercise?.id;
   const legacy = {
     shoulder_press: "seated_db_shoulder_press",
     leg_press_a2: "leg_press",
     lat_pulldown_b2: "lat_pulldown",
     leg_curl_b2: "leg_curl",
     lateral_raise_a2: "lateral_raise",
+    hip_thrust: "smith_hip_thrust",
+    chest_supported_row: "incline_bench_chest_supported_db_row",
   };
-  return exercise.profileId || exercise.groupId || legacy[exercise.id] || exercise.id;
+  return legacy[id] || id;
 }
 
 export function directMusclesFor(profileId) {
@@ -216,12 +240,14 @@ export function directMusclesFor(profileId) {
     lat_pulldown: ["back"],
     neutral_lat_pulldown: ["back"],
     seated_cable_row: ["back"],
+    incline_bench_chest_supported_db_row: ["back"],
     chest_supported_row: ["back"],
     lateral_raise: ["lateral_delts"],
     face_pull: ["rear_delts"],
     leg_press: ["quads"],
     leg_extension: ["quads"],
     romanian_deadlift: ["hamstrings_glutes"],
+    smith_hip_thrust: ["hamstrings_glutes"],
     hip_thrust: ["hamstrings_glutes"],
     leg_curl: ["hamstrings_glutes"],
     ez_bar_curl: ["biceps"],
@@ -250,9 +276,9 @@ function plannedSetsForSession(sessionId, routineName) {
 }
 
 function recentRecoveryFlags(history, weeks) {
-  return (history || []).filter((session) => daysAgo(toDate(session.date)) <= weeks * 7).flatMap((session) =>
-    Object.values(session.recoveryConfirmations || session.kneeConfirmations || {}).filter((item) => item && item.clean === false)
-  );
+  return (history || [])
+    .filter((session) => daysAgo(toDate(session.date)) <= weeks * 7)
+    .flatMap((session) => Object.values(session.recoveryConfirmations || session.kneeConfirmations || {}).filter((item) => item && item.clean === false));
 }
 
 function isSuppressed(key, cooldowns) {
@@ -296,7 +322,7 @@ function startOfWeek(date) {
 
 function weekLabel(key) {
   const date = new Date(`${key}T00:00:00`);
-  return `${date.getMonth() + 1}/${date.getDate()} 주`;
+  return `${date.getMonth() + 1}/${date.getDate()}주`;
 }
 
 function shortDate(date) {
@@ -306,10 +332,6 @@ function shortDate(date) {
 function estimateE1rm(weight, reps) {
   if (!weight || !reps) return 0;
   return round(weight * (1 + Math.min(Number(reps), 12) / 30), 1);
-}
-
-function displayLoad(profileId, weight) {
-  return profileId === "seated_db_shoulder_press" ? weight * 2 : weight;
 }
 
 function round(value, digits = 0) {
