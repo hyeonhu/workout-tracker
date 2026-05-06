@@ -1,5 +1,6 @@
 import {
   ROUTINES,
+  SESSION_EXERCISES,
   createInitialInstanceData,
   createInitialProfileData,
   migrateState,
@@ -49,6 +50,7 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
         instanceState.lastReps = Array(instanceState.currentSets).fill(exercise.min);
         instanceState.targetTotal = exercise.min * instanceState.currentSets + 1;
         instanceState.stagnationCount = 0;
+        resetSiblingInstancesForProfile(profile.id, exercise.id, instanceData);
       }
       profileState.kneeCheckPending = false;
       profileState.hamstringCheckPending = false;
@@ -104,6 +106,7 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
         instanceState.lastReps = Array(exercise.defaultSets).fill(exercise.min);
         instanceState.targetTotal = exercise.min * exercise.defaultSets + 1;
         instanceState.stagnationCount = 0;
+        resetSiblingInstancesForProfile(profile.id, exercise.id, instanceData);
       } else {
         instanceState.lastReps = reps;
         instanceState.targetTotal = totalReps + 1;
@@ -118,6 +121,7 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
         if (profile.kneeSensitive || profile.hamstringSensitive) {
           if (exercise.anchorSession && canChangeLoad) {
             profileState.weight = Math.max(0, roundWeight(profileState.weight - incrementFor(profileState)));
+            resetSiblingInstancesForProfile(profile.id, exercise.id, instanceData);
           }
           instanceState.currentSets = exercise.defaultSets;
           instanceState.stagnationCount = 0;
@@ -127,6 +131,7 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
           } else {
             if (exercise.anchorSession && canChangeLoad) {
               profileState.weight = Math.max(0, roundWeight(profileState.weight - incrementFor(profileState)));
+              resetSiblingInstancesForProfile(profile.id, exercise.id, instanceData);
             }
             instanceState.currentSets = exercise.defaultSets;
           }
@@ -198,4 +203,17 @@ function incrementFor(profileState) {
 
 function roundWeight(value) {
   return Math.round(Number(value || 0) * 10) / 10;
+}
+
+function resetSiblingInstancesForProfile(profileId, currentExerciseId, instanceData) {
+  for (const sessionExercise of SESSION_EXERCISES) {
+    if (sessionExercise.profileId !== profileId || sessionExercise.id === currentExerciseId) continue;
+    instanceData[sessionExercise.id] = {
+      ...(instanceData[sessionExercise.id] || {}),
+      lastReps: Array(sessionExercise.defaultSets).fill(sessionExercise.min),
+      targetTotal: sessionExercise.defaultSets * sessionExercise.min + 1,
+      stagnationCount: 0,
+      currentSets: sessionExercise.defaultSets,
+    };
+  }
 }

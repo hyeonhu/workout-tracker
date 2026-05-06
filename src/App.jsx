@@ -1342,17 +1342,24 @@ function PlannedSetBalanceCard() {
 }
 
 function ExerciseCard({ exercise, view, helperText }) {
+  const unit = view.isTime ? "\uCD08" : "\uD68C";
+  const lower = lowerBoundReps(exercise, view);
+  const last = lastResultReps(exercise, view);
+  const next = nextSuccessReps(exercise, view);
+
   return (
     <ExerciseLogCard exercise={exercise} view={view}>
       <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-        <Info label="현재" value={view.initialized || view.isTime ? formatWeight(view.weight, view) : "설정 필요"} />
-        <Info label="목표" value={`총 ${Number(view.targetTotal || exercise.defaultSets * exercise.min)}${view.isTime ? "초" : "회"} 이상`} />
-        <Info label="구성" value={`${view.currentSets || exercise.defaultSets}세트 x ${exercise.min}~${exercise.max}${view.isTime ? "초" : "회"}`} />
-        <Info label="정체" value={`${view.stagnationCount || 0}회`} warn={Number(view.stagnationCount || 0) > 0} />
+        <Info label="\uD604\uC7AC" value={view.initialized || view.isTime ? formatWeight(view.weight, view) : "\uC124\uC815 \uD544\uC694"} />
+        <Info label="\uAD6C\uC131" value={`${view.currentSets || exercise.defaultSets}\uC138\uD2B8 x ${exercise.min}~${exercise.max}${unit}`} />
+        <Info label="\uD558\uD55C" value={formatRepSequence(lower)} />
+        <Info label="\uC9C0\uB09C \uAE30\uB85D" value={formatRepSequence(last)} />
+        <Info label="\uB2E4\uC74C \uC131\uACF5" value={`\uCD1D ${nextSuccessTotal(exercise, view)}${unit}+ \u00B7 ${formatRepSequence(next)}`} />
+        <Info label="\uC815\uCCB4" value={`${view.stagnationCount || 0}\uD68C`} warn={Number(view.stagnationCount || 0) > 0} />
       </div>
       {helperText ? <p className="mt-3 text-sm text-amber-200">{helperText}</p> : null}
-      {view.kneeCheckPending ? <p className="mt-3 rounded-md bg-amber-500/15 px-3 py-2 text-sm text-amber-200">무릎 상태 체크 대기 중</p> : null}
-      {view.hamstringCheckPending ? <p className="mt-3 rounded-md bg-rose-500/15 px-3 py-2 text-sm text-rose-200">햄스트링 상태 체크 대기 중</p> : null}
+      {view.kneeCheckPending ? <p className="mt-3 rounded-md bg-amber-500/15 px-3 py-2 text-sm text-amber-200">\uBB34\uB98E \uC0C1\uD0DC \uCCB4\uD06C \uB300\uAE30 \uC911</p> : null}
+      {view.hamstringCheckPending ? <p className="mt-3 rounded-md bg-rose-500/15 px-3 py-2 text-sm text-rose-200">\uD584\uC2A4\uD2B8\uB9C1 \uC0C1\uD0DC \uCCB4\uD06C \uB300\uAE30 \uC911</p> : null}
     </ExerciseLogCard>
   );
 }
@@ -1365,12 +1372,12 @@ function ExerciseLogCard({ exercise, view, children }) {
         <div className="min-w-0">
           <h3 className="break-keep text-lg font-bold text-white">{view.name}</h3>
           <p className="mt-1 text-sm text-app-muted">
-            {view.currentSets || exercise.defaultSets}세트 · {exercise.min}~{exercise.max}
-            {view.isTime ? "초" : "회"} {exercise.anchorSession ? "· 앵커" : "· 공유 중량"}
+            {view.currentSets || exercise.defaultSets}\uC138\uD2B8 \u00B7 {exercise.min}~{exercise.max}
+            {view.isTime ? "\uCD08" : "\uD68C"} {exercise.anchorSession ? "\u00B7 \uC575\uCEE4" : "\u00B7 \uACF5\uC720 \uC911\uB7C9"}
           </p>
         </div>
         <span className="shrink-0 rounded-md px-2 py-1 text-xs font-bold text-white" style={{ backgroundColor: meta.color }}>
-          {view.kneeSensitive ? "무릎 주의" : view.hamstringSensitive ? "햄스트링 주의" : meta.label}
+          {view.kneeSensitive ? "\uBB34\uB98E \uC8FC\uC758" : view.hamstringSensitive ? "\uD584\uC2A4\uD2B8\uB9C1 \uC8FC\uC758" : meta.label}
         </span>
       </div>
       {children}
