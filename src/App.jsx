@@ -46,7 +46,7 @@ import {
   weeklyMuscleVolume,
 } from "./analytics";
 import { applyDeload, completeSession, sum } from "./progression";
-import { formatRepSequence, lastResultReps, lowerBoundReps, nextSuccessReps, nextSuccessTotal } from "./progressTargets.js";
+import { formatRepSequence, lastResultReps, nextSuccessReps, nextSuccessTotal } from "./progressTargets.js";
 
 const tabs = [
   { id: "today", label: "오늘", icon: Activity },
@@ -215,7 +215,8 @@ export default function App() {
     for (const exercise of routine.exercises) {
       const view = instanceView(exercise, appState);
       const sets = Number(view.currentSets || exercise.defaultSets);
-      const source = view.lastReps?.length ? view.lastReps : Array(sets).fill(exercise.min);
+      const suggested = nextSuccessReps(exercise, view);
+      const source = suggested.length ? suggested : view.lastReps?.length ? view.lastReps : Array(sets).fill(exercise.min);
       nextEntries[exercise.id] = Array.from({ length: sets }, (_, index) => Number(source[index] || exercise.min));
     }
     setEntries(nextEntries);
@@ -1344,7 +1345,6 @@ function PlannedSetBalanceCard() {
 
 function ExerciseCard({ exercise, view, helperText }) {
   const unit = view.isTime ? "초" : "회";
-  const lower = lowerBoundReps(exercise, view);
   const last = lastResultReps(exercise, view);
   const next = nextSuccessReps(exercise, view);
 
@@ -1353,7 +1353,6 @@ function ExerciseCard({ exercise, view, helperText }) {
       <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
         <Info label="현재" value={view.initialized || view.isTime ? formatWeight(view.weight, view) : "설정 필요"} />
         <Info label="구성" value={`${view.currentSets || exercise.defaultSets}세트 x ${exercise.min}~${exercise.max}${unit}`} />
-        <Info label="하한" value={formatRepSequence(lower)} />
         <Info label="지난 기록" value={formatRepSequence(last)} />
         <Info label="다음 성공" value={`총 ${nextSuccessTotal(exercise, view)}${unit}+ · ${formatRepSequence(next)}`} />
         <Info label="정체" value={`${view.stagnationCount || 0}회`} warn={Number(view.stagnationCount || 0) > 0} />
