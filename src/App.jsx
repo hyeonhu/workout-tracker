@@ -46,6 +46,7 @@ import {
   weeklyMuscleVolume,
 } from "./analytics";
 import { applyDeload, completeSession, sum } from "./progression";
+import { formatRepSequence, lastResultReps, lowerBoundReps, nextSuccessReps, nextSuccessTotal } from "./progressTargets.js";
 
 const tabs = [
   { id: "today", label: "오늘", icon: Activity },
