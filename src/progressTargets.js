@@ -11,15 +11,14 @@ export function lastResultReps(exercise, view) {
 }
 
 export function nextSuccessReps(exercise, view) {
-  const last = lastResultReps(exercise, view);
-  if (!last.length) return [];
-  const next = [...last];
-  next[0] = Number(next[0] || 0) + 1;
-  return next;
+  const fallback = lowerBoundReps(exercise, view);
+  const stored = Array.isArray(view?.targetReps) ? view.targetReps.map((value) => Number(value || 0)) : [];
+  if (!stored.length) return fallback;
+  return Array.from({ length: fallback.length }, (_, index) => Number(stored[index] || fallback[index] || 0));
 }
 
 export function nextSuccessTotal(exercise, view) {
-  return sumReps(lastResultReps(exercise, view)) + 1;
+  return sumReps(nextSuccessReps(exercise, view));
 }
 
 export function formatRepSequence(values, unit = "회") {

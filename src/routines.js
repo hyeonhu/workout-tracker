@@ -301,6 +301,8 @@ export function createInitialInstanceData() {
       exercise.id,
       {
         lastReps: [],
+        successfulReps: [],
+        targetReps: Array(exercise.defaultSets).fill(exercise.min),
         targetTotal: exercise.defaultSets * exercise.min,
         stagnationCount: 0,
         currentSets: exercise.defaultSets,
@@ -343,6 +345,8 @@ export function migrateState(rawState) {
       migrated.instanceData[exercise.id] = {
         ...migrated.instanceData[exercise.id],
         lastReps: old.lastReps || [],
+        successfulReps: old.successfulReps || old.lastReps || [],
+        targetReps: old.targetReps || buildLegacyTargetReps(old.lastReps, exercise),
         targetTotal: Number(old.targetTotal || exercise.defaultSets * exercise.min),
         stagnationCount: Number(old.stagnationCount || 0),
         currentSets: Number(old.currentSets || exercise.defaultSets),
@@ -384,6 +388,29 @@ export function migrateState(rawState) {
     };
   }
 
+  for (const exercise of SESSION_EXERCISES) {
+    const current = migrated.instanceData[exercise.id] || {};
+    migrated.instanceData[exercise.id] = {
+      ...base.instanceData[exercise.id],
+      ...current,
+      lastReps: Array.isArray(current.lastReps) ? current.lastReps : [],
+      successfulReps: Array.isArray(current.successfulReps)
+        ? current.successfulReps
+        : Array.isArray(current.lastReps)
+          ? current.lastReps
+          : [],
+      targetReps: Array.isArray(current.targetReps) && current.targetReps.length
+        ? current.targetReps
+        : buildLegacyTargetReps(
+            Array.isArray(current.successfulReps) && current.successfulReps.length ? current.successfulReps : current.lastReps,
+            exercise
+          ),
+      targetTotal: Number(current.targetTotal || exercise.defaultSets * exercise.min),
+      stagnationCount: Number(current.stagnationCount || 0),
+      currentSets: Number(current.currentSets || exercise.defaultSets),
+    };
+  }
+
   return migrated;
 }
 
@@ -410,6 +437,19 @@ export function instanceView(exercise, state) {
     baseWeight: effectiveBaseWeight(profileItem, profileState?.baseWeight),
     normalizedTotalLoad: normalizeTotalLoad(profileItem, profileState?.weight, profileState?.baseWeight),
   };
+}
+
+function buildLegacyTargetReps(lastReps, exercise) {
+  if (!Array.isArray(lastReps) || !lastReps.length) {
+    return Array(exercise.defaultSets).fill(exercise.min);
+  }
+  const reps = Array.from({ length: exercise.defaultSets }, (_, index) => Number(lastReps[index] || exercise.min));
+  const candidates = reps.map((rep, index) => ({ rep, index })).filter((item) => item.rep < exercise.max);
+  if (!candidates.length) return reps;
+  const lowest = Math.min(...candidates.map((item) => item.rep));
+  const picked = candidates.find((item) => item.rep === lowest);
+  reps[picked.index] += 1;
+  return reps;
 }
 
 export function sessionSummary(routine) {

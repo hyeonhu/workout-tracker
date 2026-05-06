@@ -32,13 +32,7 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
       ),
     };
 
-    let instanceState = {
-      ...instanceData[exercise.id],
-      lastReps: Array.isArray(instanceData[exercise.id]?.lastReps) ? instanceData[exercise.id].lastReps : [],
-      targetTotal: Number(instanceData[exercise.id]?.targetTotal || exercise.defaultSets * exercise.min),
-      stagnationCount: Number(instanceData[exercise.id]?.stagnationCount || 0),
-      currentSets: Number(instanceData[exercise.id]?.currentSets || exercise.defaultSets),
-    };
+    let instanceState = normalizeInstanceState(instanceData[exercise.id], exercise);
 
     if (exercise.anchorSession && profileState.recoveryCheckPending && kneeApprovals[exercise.id] !== undefined) {
       recoveryConfirmations[exercise.id] = {
@@ -47,9 +41,7 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
       };
       if (kneeApprovals[exercise.id] === true) {
         profileState.weight = roundWeight(profileState.weight + incrementFor(profileState));
-        instanceState.lastReps = Array(instanceState.currentSets).fill(exercise.min);
-        instanceState.targetTotal = exercise.min * instanceState.currentSets + 1;
-        instanceState.stagnationCount = 0;
+        instanceState = resetInstanceProgress(instanceState, exercise);
         resetSiblingInstancesForProfile(profile.id, exercise.id, instanceData);
       }
       profileState.kneeCheckPending = false;
@@ -57,11 +49,15 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
       profileState.recoveryCheckPending = false;
     }
 
-    const reps = entries[exercise.id] || [];
+    const reps = (entries[exercise.id] || []).map((value) => Number(value || 0));
     const totalReps = sum(reps);
+    const lowerBound = lowerBoundArray(exercise, instanceState.currentSets);
+    const lastSuccessful = instanceState.successfulReps.length ? instanceState.successfulReps : [];
+    const currentTarget = instanceState.targetReps.length ? instanceState.targetReps : defaultTargetReps(exercise, instanceState);
+    const successfulBaselineTotal = lastSuccessful.length ? sum(lastSuccessful) : null;
+    const meetsLowerBound = reps.length > 0 && reps.every((rep) => rep >= exercise.min);
+    const isSuccess = meetsLowerBound && (successfulBaselineTotal === null ? true : totalReps >= successfulBaselineTotal + 1);
     const allAtTop = reps.length > 0 && reps.every((rep) => Number(rep) >= exercise.max);
-    const comparableTotal = sum(instanceState.lastReps);
-    const improved = totalReps > comparableTotal;
     const wasExtraSet = instanceState.currentSets > exercise.defaultSets;
     const canChangeLoad = exercise.anchorSession && profileState.initialized && incrementFor(profileState) > 0;
     const normalizedTotalLoad = normalizeTotalLoad(profile, profileState.weight, profileState.baseWeight);
@@ -92,30 +88,38 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
       anchorSession: exercise.anchorSession,
     });
 
-    if (allAtTop && profileState.initialized) {
-      if ((profile.kneeSensitive || profile.hamstringSensitive) && exercise.anchorSession) {
-        profileState.kneeCheckPending = Boolean(profile.kneeSensitive);
-        profileState.hamstringCheckPending = Boolean(profile.hamstringSensitive);
-        profileState.recoveryCheckPending = true;
-        instanceState.lastReps = reps;
-        instanceState.targetTotal = totalReps + 1;
-        instanceState.stagnationCount = 0;
-      } else if (canChangeLoad) {
-        profileState.weight = roundWeight(profileState.weight + incrementFor(profileState));
-        instanceState.currentSets = exercise.defaultSets;
-        instanceState.lastReps = Array(exercise.defaultSets).fill(exercise.min);
-        instanceState.targetTotal = exercise.min * exercise.defaultSets + 1;
-        instanceState.stagnationCount = 0;
-        resetSiblingInstancesForProfile(profile.id, exercise.id, instanceData);
+    instanceState.lastReps = reps;
+
+    if (isSuccess) {
+      if (allAtTop && profileState.initialized) {
+        if ((profile.kneeSensitive || profile.hamstringSensitive) && exercise.anchorSession) {
+          profileState.kneeCheckPending = Boolean(profile.kneeSensitive);
+          profileState.hamstringCheckPending = Boolean(profile.hamstringSensitive);
+          profileState.recoveryCheckPending = true;
+          instanceState.successfulReps = reps;
+          instanceState.targetReps = buildNextTargetFromSuccessful(reps, exercise.max);
+          instanceState.targetTotal = sum(instanceState.targetReps);
+          instanceState.stagnationCount = 0;
+        } else if (canChangeLoad) {
+          profileState.weight = roundWeight(profileState.weight + incrementFor(profileState));
+          instanceState = resetInstanceProgress(instanceState, exercise);
+          resetSiblingInstancesForProfile(profile.id, exercise.id, instanceData);
+        } else {
+          instanceState.successfulReps = reps;
+          instanceState.targetReps = buildNextTargetFromSuccessful(reps, exercise.max);
+          instanceState.targetTotal = sum(instanceState.targetReps);
+          instanceState.stagnationCount = 0;
+        }
       } else {
-        instanceState.lastReps = reps;
-        instanceState.targetTotal = totalReps + 1;
+        instanceState.successfulReps = reps;
+        instanceState.targetReps = buildNextTargetFromSuccessful(reps, exercise.max);
+        instanceState.targetTotal = sum(instanceState.targetReps);
         instanceState.stagnationCount = 0;
       }
     } else {
-      instanceState.lastReps = reps;
-      instanceState.targetTotal = totalReps + 1;
-      instanceState.stagnationCount = improved ? 0 : instanceState.stagnationCount + 1;
+      instanceState.targetReps = currentTarget;
+      instanceState.targetTotal = sum(currentTarget);
+      instanceState.stagnationCount = Number(instanceState.stagnationCount || 0) + 1;
 
       if (instanceState.stagnationCount >= 3) {
         if (profile.kneeSensitive || profile.hamstringSensitive) {
@@ -124,16 +128,25 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
             resetSiblingInstancesForProfile(profile.id, exercise.id, instanceData);
           }
           instanceState.currentSets = exercise.defaultSets;
+          instanceState.successfulReps = [];
+          instanceState.targetReps = lowerBoundArray(exercise, exercise.defaultSets);
+          instanceState.targetTotal = sum(instanceState.targetReps);
           instanceState.stagnationCount = 0;
         } else if (profile.category === "upper_main") {
           if (!wasExtraSet) {
             instanceState.currentSets = exercise.defaultSets + 1;
+            instanceState.successfulReps = [];
+            instanceState.targetReps = lowerBoundArray(exercise, instanceState.currentSets);
+            instanceState.targetTotal = sum(instanceState.targetReps);
           } else {
             if (exercise.anchorSession && canChangeLoad) {
               profileState.weight = Math.max(0, roundWeight(profileState.weight - incrementFor(profileState)));
               resetSiblingInstancesForProfile(profile.id, exercise.id, instanceData);
             }
             instanceState.currentSets = exercise.defaultSets;
+            instanceState.successfulReps = [];
+            instanceState.targetReps = lowerBoundArray(exercise, exercise.defaultSets);
+            instanceState.targetTotal = sum(instanceState.targetReps);
           }
           instanceState.stagnationCount = 0;
         } else {
@@ -169,10 +182,13 @@ export function applyDeload(rawState) {
   const instanceData = { ...state.instanceData };
   for (const routine of ROUTINES) {
     for (const exercise of routine.exercises) {
-      const current = instanceData[exercise.id] || {};
+      const current = normalizeInstanceState(instanceData[exercise.id], exercise);
+      const currentSets = Math.max(1, Math.ceil(Number(current.currentSets || exercise.defaultSets) / 2));
       instanceData[exercise.id] = {
         ...current,
-        currentSets: Math.max(1, Math.ceil(Number(current.currentSets || exercise.defaultSets) / 2)),
+        currentSets,
+        targetReps: lowerBoundArray(exercise, currentSets),
+        targetTotal: sum(lowerBoundArray(exercise, currentSets)),
         stagnationCount: 0,
       };
     }
@@ -193,8 +209,69 @@ export function sum(values) {
 
 export function comparableTarget(exercise, state) {
   const migrated = migrateState(state);
-  const current = migrated.instanceData?.[exercise.id];
-  return Number(current?.targetTotal || exercise.defaultSets * exercise.min);
+  const current = normalizeInstanceState(migrated.instanceData?.[exercise.id], exercise);
+  return Number(current?.targetTotal || sum(defaultTargetReps(exercise, current)));
+}
+
+function normalizeInstanceState(rawInstance, exercise) {
+  const currentSets = Number(rawInstance?.currentSets || exercise.defaultSets);
+  const successfulReps = sanitizeReps(rawInstance?.successfulReps, currentSets);
+  const targetReps = sanitizeReps(rawInstance?.targetReps, currentSets);
+  const defaultTarget = defaultTargetReps(exercise, { currentSets, successfulReps, targetReps });
+  return {
+    ...(rawInstance || {}),
+    lastReps: sanitizeReps(rawInstance?.lastReps, currentSets),
+    successfulReps,
+    targetReps: targetReps.length ? targetReps : defaultTarget,
+    targetTotal: Number(rawInstance?.targetTotal || sum(targetReps.length ? targetReps : defaultTarget)),
+    stagnationCount: Number(rawInstance?.stagnationCount || 0),
+    currentSets,
+  };
+}
+
+function sanitizeReps(values, expectedLength) {
+  if (!Array.isArray(values)) return [];
+  const cleaned = values.map((value) => Number(value || 0)).filter((value) => Number.isFinite(value));
+  if (!cleaned.length) return [];
+  return Array.from({ length: expectedLength }, (_, index) => Number(cleaned[index] || 0));
+}
+
+function defaultTargetReps(exercise, instanceState) {
+  if (instanceState?.targetReps?.length) return instanceState.targetReps;
+  if (instanceState?.successfulReps?.length) return buildNextTargetFromSuccessful(instanceState.successfulReps, exercise.max);
+  return lowerBoundArray(exercise, instanceState?.currentSets || exercise.defaultSets);
+}
+
+function lowerBoundArray(exercise, sets) {
+  return Array.from({ length: Number(sets || exercise.defaultSets || 0) }, () => Number(exercise.min || 0));
+}
+
+function buildNextTargetFromSuccessful(successfulReps, maxRep) {
+  if (!Array.isArray(successfulReps) || !successfulReps.length) return [];
+  const next = successfulReps.map((value) => Number(value || 0));
+  const candidates = next
+    .map((rep, index) => ({ rep, index }))
+    .filter((item) => item.rep < Number(maxRep || 0));
+
+  if (!candidates.length) return [...next];
+
+  const lowest = Math.min(...candidates.map((item) => item.rep));
+  const target = candidates.find((item) => item.rep === lowest);
+  next[target.index] += 1;
+  return next;
+}
+
+function resetInstanceProgress(instanceState, exercise) {
+  const targetReps = lowerBoundArray(exercise, exercise.defaultSets);
+  return {
+    ...instanceState,
+    currentSets: exercise.defaultSets,
+    lastReps: [],
+    successfulReps: [],
+    targetReps,
+    targetTotal: sum(targetReps),
+    stagnationCount: 0,
+  };
 }
 
 function incrementFor(profileState) {
@@ -208,10 +285,13 @@ function roundWeight(value) {
 function resetSiblingInstancesForProfile(profileId, currentExerciseId, instanceData) {
   for (const sessionExercise of SESSION_EXERCISES) {
     if (sessionExercise.profileId !== profileId || sessionExercise.id === currentExerciseId) continue;
+    const targetReps = lowerBoundArray(sessionExercise, sessionExercise.defaultSets);
     instanceData[sessionExercise.id] = {
       ...(instanceData[sessionExercise.id] || {}),
-      lastReps: Array(sessionExercise.defaultSets).fill(sessionExercise.min),
-      targetTotal: sessionExercise.defaultSets * sessionExercise.min + 1,
+      lastReps: [],
+      successfulReps: [],
+      targetReps,
+      targetTotal: sum(targetReps),
       stagnationCount: 0,
       currentSets: sessionExercise.defaultSets,
     };

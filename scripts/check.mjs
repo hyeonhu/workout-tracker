@@ -56,8 +56,8 @@ const a1LegEntries = {
 };
 const a1LegResult = completeSession(legPressAnchorState, ROUTINES[0], a1LegEntries, { a1_leg_press: true });
 assert.equal(a1LegResult.nextState.profileData.leg_press.weight, 42.5, "A1 leg press anchor should raise shared weight after clean knee check");
-assert.deepEqual(a1LegResult.nextState.instanceData.a2_leg_press.lastReps, [12, 12], "A2 leg press should reset to its own lower bound after anchor load change");
-assert.equal(a1LegResult.nextState.instanceData.a2_leg_press.targetTotal, 25, "A2 leg press target should be session-specific after shared weight change");
+assert.deepEqual(a1LegResult.nextState.instanceData.a2_leg_press.targetReps, [12, 12], "A2 leg press target should reset to its own lower bound after anchor load change");
+assert.equal(a1LegResult.nextState.instanceData.a2_leg_press.targetTotal, 24, "A2 leg press target should reset to its own lower bound after shared weight change");
 assert.equal(a1LegResult.nextState.instanceData.a2_leg_press.stagnationCount, 0, "A2 leg press stall count should reset on shared load change");
 
 const hamstringInitial = createInitialState();
@@ -87,12 +87,35 @@ assert.equal(miniWarmupHelperText(ROUTINES[3].exercises[6]), "웜업: 동적 준
 const rdlView = {
   currentSets: 3,
   lastReps: [10, 10, 10],
+  targetReps: [11, 10, 10],
   isTime: false,
 };
 assert.deepEqual(lowerBoundReps(ROUTINES[1].exercises[0], rdlView), [8, 8, 8]);
 assert.deepEqual(lastResultReps(ROUTINES[1].exercises[0], rdlView), [10, 10, 10]);
 assert.deepEqual(nextSuccessReps(ROUTINES[1].exercises[0], rdlView), [11, 10, 10]);
 assert.equal(nextSuccessTotal(ROUTINES[1].exercises[0], rdlView), 31);
+
+const targetState = createInitialState();
+targetState.profileData.romanian_deadlift.initialized = true;
+targetState.instanceData.b1_romanian_deadlift.successfulReps = [10, 10, 10];
+targetState.instanceData.b1_romanian_deadlift.targetReps = [11, 10, 10];
+targetState.instanceData.b1_romanian_deadlift.targetTotal = 31;
+const failEntries = Object.fromEntries(ROUTINES[1].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.min)]));
+failEntries.b1_romanian_deadlift = [11, 9, 8];
+const failResult = completeSession(targetState, ROUTINES[1], failEntries, {});
+assert.deepEqual(failResult.nextState.instanceData.b1_romanian_deadlift.successfulReps, [10, 10, 10], "Failed result must not replace last successful result");
+assert.deepEqual(failResult.nextState.instanceData.b1_romanian_deadlift.targetReps, [11, 10, 10], "Failed result must not create a new target");
+
+const successState = createInitialState();
+successState.profileData.romanian_deadlift.initialized = true;
+successState.instanceData.b1_romanian_deadlift.successfulReps = [10, 10, 10];
+successState.instanceData.b1_romanian_deadlift.targetReps = [11, 10, 10];
+successState.instanceData.b1_romanian_deadlift.targetTotal = 31;
+const successEntries = Object.fromEntries(ROUTINES[1].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.min)]));
+successEntries.b1_romanian_deadlift = [11, 10, 10];
+const successResult = completeSession(successState, ROUTINES[1], successEntries, {});
+assert.deepEqual(successResult.nextState.instanceData.b1_romanian_deadlift.successfulReps, [11, 10, 10], "Successful result should become the new successful baseline");
+assert.deepEqual(successResult.nextState.instanceData.b1_romanian_deadlift.targetReps, [11, 11, 10], "Next target should add 1 to the lowest set, left to right");
 
 const history = [
   {
