@@ -28,8 +28,9 @@ const initial = createInitialState();
 
 const b2Entries = Object.fromEntries(ROUTINES[3].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.max)]));
 const b2Result = completeSession(initial, ROUTINES[3], b2Entries, {});
-assert.equal(b2Result.nextState.profileData.lat_pulldown.weight, initial.profileData.lat_pulldown.weight, "B2 lat pulldown must not progress shared load");
-assert.equal(b2Result.nextState.profileData.leg_curl.weight, initial.profileData.leg_curl.weight, "B2 leg curl must not progress shared load");
+assert.equal(b2Result.nextState.profileData.lat_pulldown.weight, 47.5, "B2 lat pulldown should also progress the shared load");
+assert.equal(b2Result.nextState.profileData.leg_curl.weight, initial.profileData.leg_curl.weight, "Sensitive shared loads should still wait for a clean follow-up check");
+assert.equal(b2Result.nextState.profileData.leg_curl.hamstringCheckPending, true, "B2 leg curl should schedule a hamstring check");
 assert.equal(b2Result.nextState.instanceData.b2_lat_pulldown.stagnationCount, 0);
 
 const a1Entries = Object.fromEntries(ROUTINES[0].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.max)]));
@@ -118,6 +119,17 @@ const successResult = completeSession(successState, ROUTINES[1], successEntries,
 assert.deepEqual(successResult.nextState.instanceData.b1_romanian_deadlift.successfulReps, [11, 10, 10], "Successful result should become the new successful baseline");
 assert.deepEqual(successResult.nextState.instanceData.b1_romanian_deadlift.targetReps, [11, 11, 10], "Next target should add 1 to the lowest set, left to right");
 
+const posteriorStallState = createInitialState();
+posteriorStallState.profileData.smith_hip_thrust.initialized = true;
+posteriorStallState.instanceData.b2_hip_thrust.stagnationCount = 2;
+posteriorStallState.instanceData.b2_hip_thrust.successfulReps = [8, 8, 8];
+posteriorStallState.instanceData.b2_hip_thrust.targetReps = [9, 8, 8];
+posteriorStallState.instanceData.b2_hip_thrust.targetTotal = 25;
+const posteriorFailEntries = Object.fromEntries(ROUTINES[3].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.min)]));
+posteriorFailEntries.b2_hip_thrust = [8, 8, 8];
+const posteriorStallResult = completeSession(posteriorStallState, ROUTINES[3], posteriorFailEntries, {});
+assert.equal(posteriorStallResult.nextState.instanceData.b2_hip_thrust.currentSets, 4, "Posterior lifts should add one set after three stalls");
+
 const topOutState = createInitialState();
 topOutState.profileData.romanian_deadlift.initialized = true;
 topOutState.profileData.romanian_deadlift.weight = 15;
@@ -140,7 +152,7 @@ const a2LegPressEntries = Object.fromEntries(ROUTINES[2].exercises.map((exercise
 a2LegPressEntries.a2_leg_press = [15, 15];
 const a2LegPressResult = completeSession(a2LegPressState, ROUTINES[2], a2LegPressEntries, {});
 assert.equal(a2LegPressResult.nextState.profileData.leg_press.kneeCheckPending, true, "Leg press should request a knee check after A2 as well");
-assert.equal(a2LegPressResult.nextState.profileData.leg_press.pendingLoadIncrease, false, "A2 leg press should not arm a shared load increase");
+assert.equal(a2LegPressResult.nextState.profileData.leg_press.pendingLoadIncrease, true, "A2 leg press should also be able to arm the shared load increase");
 assert.deepEqual(a2LegPressResult.nextState.instanceData.a1_leg_press.targetReps, [10, 10, 10], "A2 leg press should not overwrite the A1 leg press target");
 
 const pendingIncreaseState = createInitialState();
