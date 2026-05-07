@@ -43,6 +43,7 @@ legPressAnchorState.profileData.leg_press.initialized = true;
 legPressAnchorState.profileData.leg_press.weight = 40;
 legPressAnchorState.profileData.leg_press.kneeCheckPending = true;
 legPressAnchorState.profileData.leg_press.recoveryCheckPending = true;
+legPressAnchorState.profileData.leg_press.pendingLoadIncrease = true;
 legPressAnchorState.instanceData.a2_leg_press.lastReps = [15, 15];
 legPressAnchorState.instanceData.a2_leg_press.targetTotal = 31;
 legPressAnchorState.instanceData.a2_leg_press.stagnationCount = 2;
@@ -116,6 +117,47 @@ successEntries.b1_romanian_deadlift = [11, 10, 10];
 const successResult = completeSession(successState, ROUTINES[1], successEntries, {});
 assert.deepEqual(successResult.nextState.instanceData.b1_romanian_deadlift.successfulReps, [11, 10, 10], "Successful result should become the new successful baseline");
 assert.deepEqual(successResult.nextState.instanceData.b1_romanian_deadlift.targetReps, [11, 11, 10], "Next target should add 1 to the lowest set, left to right");
+
+const topOutState = createInitialState();
+topOutState.profileData.romanian_deadlift.initialized = true;
+topOutState.profileData.romanian_deadlift.weight = 15;
+topOutState.instanceData.b1_romanian_deadlift.successfulReps = [11, 12, 12];
+topOutState.instanceData.b1_romanian_deadlift.targetReps = [12, 12, 12];
+topOutState.instanceData.b1_romanian_deadlift.targetTotal = 36;
+const topOutEntries = Object.fromEntries(ROUTINES[1].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.min)]));
+topOutEntries.b1_romanian_deadlift = [12, 12, 12];
+const topOutResult = completeSession(topOutState, ROUTINES[1], topOutEntries, {});
+assert.equal(topOutResult.nextState.profileData.romanian_deadlift.weight, 17.5, "Top-end success should increase load");
+assert.deepEqual(topOutResult.nextState.instanceData.b1_romanian_deadlift.targetReps, [8, 8, 8], "After load increase, the next target should reset to the lower bound");
+
+const a2LegPressState = createInitialState();
+a2LegPressState.profileData.leg_press.initialized = true;
+a2LegPressState.profileData.leg_press.weight = 40;
+a2LegPressState.instanceData.a2_leg_press.successfulReps = [14, 15];
+a2LegPressState.instanceData.a2_leg_press.targetReps = [15, 15];
+a2LegPressState.instanceData.a2_leg_press.targetTotal = 30;
+const a2LegPressEntries = Object.fromEntries(ROUTINES[2].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.min)]));
+a2LegPressEntries.a2_leg_press = [15, 15];
+const a2LegPressResult = completeSession(a2LegPressState, ROUTINES[2], a2LegPressEntries, {});
+assert.equal(a2LegPressResult.nextState.profileData.leg_press.kneeCheckPending, true, "Leg press should request a knee check after A2 as well");
+assert.equal(a2LegPressResult.nextState.profileData.leg_press.pendingLoadIncrease, false, "A2 leg press should not arm a shared load increase");
+assert.deepEqual(a2LegPressResult.nextState.instanceData.a1_leg_press.targetReps, [10, 10, 10], "A2 leg press should not overwrite the A1 leg press target");
+
+const pendingIncreaseState = createInitialState();
+pendingIncreaseState.profileData.leg_press.initialized = true;
+pendingIncreaseState.profileData.leg_press.weight = 40;
+pendingIncreaseState.profileData.leg_press.kneeCheckPending = true;
+pendingIncreaseState.profileData.leg_press.recoveryCheckPending = true;
+pendingIncreaseState.profileData.leg_press.pendingLoadIncrease = true;
+pendingIncreaseState.instanceData.a1_leg_press.successfulReps = [15, 15, 15];
+pendingIncreaseState.instanceData.a1_leg_press.targetReps = [15, 15, 15];
+pendingIncreaseState.instanceData.a1_leg_press.targetTotal = 45;
+const pendingIncreaseEntries = Object.fromEntries(ROUTINES[2].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.min)]));
+pendingIncreaseEntries.a2_leg_press = [15, 15];
+const pendingIncreaseResult = completeSession(pendingIncreaseState, ROUTINES[2], pendingIncreaseEntries, { a2_leg_press: true });
+assert.equal(pendingIncreaseResult.nextState.profileData.leg_press.weight, 42.5, "Clean follow-up knee check should move the shared weight up");
+assert.deepEqual(pendingIncreaseResult.nextState.instanceData.a2_leg_press.targetReps, [12, 12], "The session that consumes a pending increase should restart from its own lower bound");
+assert.deepEqual(pendingIncreaseResult.nextState.instanceData.a1_leg_press.targetReps, [10, 10, 10], "Sibling shared sessions should keep their own lower bounds after the shared increase");
 
 const history = [
   {

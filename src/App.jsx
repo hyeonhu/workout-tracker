@@ -88,7 +88,7 @@ export default function App() {
     ? routine.exercises.filter((exercise) => {
         const profile = profileById(exercise.profileId);
         const view = instanceView(exercise, appState);
-        return exercise.anchorSession && (profile.kneeSensitive || profile.hamstringSensitive) && view.recoveryCheckPending;
+        return (profile.kneeSensitive || profile.hamstringSensitive) && view.recoveryCheckPending;
       })
     : [];
 

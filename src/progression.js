@@ -25,6 +25,7 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
       initialized: Boolean(profileData[profile.id]?.initialized || profile.isTime),
       kneeCheckPending: Boolean(profileData[profile.id]?.kneeCheckPending),
       hamstringCheckPending: Boolean(profileData[profile.id]?.hamstringCheckPending),
+      pendingLoadIncrease: Boolean(profileData[profile.id]?.pendingLoadIncrease),
       recoveryCheckPending: Boolean(
         profileData[profile.id]?.recoveryCheckPending ||
           profileData[profile.id]?.kneeCheckPending ||
@@ -33,13 +34,19 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
     };
 
     let instanceState = normalizeInstanceState(instanceData[exercise.id], exercise);
+    const loggedWeight = Number(profileState.weight || 0);
+    const loggedBaseWeight = effectiveBaseWeight(profile, profileState.baseWeight);
+    let consumedRecoveryCheck = false;
+    let appliedRecoveryIncrease = false;
 
-    if (exercise.anchorSession && profileState.recoveryCheckPending && kneeApprovals[exercise.id] !== undefined) {
+    if ((profile.kneeSensitive || profile.hamstringSensitive) && profileState.recoveryCheckPending && kneeApprovals[exercise.id] !== undefined) {
+      consumedRecoveryCheck = true;
       recoveryConfirmations[exercise.id] = {
         clean: Boolean(kneeApprovals[exercise.id]),
         type: profile.kneeSensitive ? "knee" : profile.hamstringSensitive ? "hamstring" : "general",
       };
-      if (kneeApprovals[exercise.id] === true) {
+      if (kneeApprovals[exercise.id] === true && profileState.pendingLoadIncrease) {
+        appliedRecoveryIncrease = true;
         profileState.weight = roundWeight(profileState.weight + incrementFor(profileState));
         instanceState = resetInstanceProgress(instanceState, exercise);
         resetSiblingInstancesForProfile(profile.id, exercise.id, instanceData);
@@ -47,6 +54,7 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
       profileState.kneeCheckPending = false;
       profileState.hamstringCheckPending = false;
       profileState.recoveryCheckPending = false;
+      profileState.pendingLoadIncrease = false;
     }
 
     const reps = (entries[exercise.id] || []).map((value) => Number(value || 0));
@@ -60,15 +68,15 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
     const allAtTop = reps.length > 0 && reps.every((rep) => Number(rep) >= exercise.max);
     const wasExtraSet = instanceState.currentSets > exercise.defaultSets;
     const canChangeLoad = exercise.anchorSession && profileState.initialized && incrementFor(profileState) > 0;
-    const normalizedTotalLoad = normalizeTotalLoad(profile, profileState.weight, profileState.baseWeight);
+    const normalizedTotalLoad = normalizeTotalLoad(profile, loggedWeight, loggedBaseWeight);
 
     historyExercises.push({
       id: exercise.id,
       instanceId: exercise.id,
       profileId: profile.id,
       name: profile.name,
-      weight: Number(profileState.weight || 0),
-      baseWeight: effectiveBaseWeight(profile, profileState.baseWeight),
+      weight: loggedWeight,
+      baseWeight: loggedBaseWeight,
       loadType: profile.loadType,
       entryMode: profile.entryMode,
       displayMode: profile.displayMode,
@@ -78,8 +86,8 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
       sets: reps.map((rep, index) => ({
         set: index + 1,
         reps: Number(rep || 0),
-        weight: Number(profileState.weight || 0),
-        baseWeight: effectiveBaseWeight(profile, profileState.baseWeight),
+        weight: loggedWeight,
+        baseWeight: loggedBaseWeight,
         normalizedTotalLoad,
       })),
       muscleFactors: profile.muscleFactors,
@@ -90,15 +98,29 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
 
     instanceState.lastReps = reps;
 
+    if (appliedRecoveryIncrease) {
+      if ((profile.kneeSensitive || profile.hamstringSensitive) && reps.length > 0) {
+        profileState.kneeCheckPending = Boolean(profile.kneeSensitive);
+        profileState.hamstringCheckPending = Boolean(profile.hamstringSensitive);
+        profileState.recoveryCheckPending = true;
+        profileState.pendingLoadIncrease = false;
+      }
+      instanceState = resetInstanceProgress(instanceState, exercise);
+      profileData[profile.id] = profileState;
+      instanceData[exercise.id] = instanceState;
+      continue;
+    }
+
     if (isSuccess) {
       if (allAtTop && profileState.initialized) {
-        if ((profile.kneeSensitive || profile.hamstringSensitive) && exercise.anchorSession) {
+        if (profile.kneeSensitive || profile.hamstringSensitive) {
           profileState.kneeCheckPending = Boolean(profile.kneeSensitive);
           profileState.hamstringCheckPending = Boolean(profile.hamstringSensitive);
           profileState.recoveryCheckPending = true;
+          profileState.pendingLoadIncrease = Boolean(exercise.anchorSession && canChangeLoad);
           instanceState.successfulReps = reps;
-          instanceState.targetReps = buildNextTargetFromSuccessful(reps, exercise.max);
-          instanceState.targetTotal = sum(instanceState.targetReps);
+          instanceState.targetReps = currentTarget;
+          instanceState.targetTotal = sum(currentTarget);
           instanceState.stagnationCount = 0;
         } else if (canChangeLoad) {
           profileState.weight = roundWeight(profileState.weight + incrementFor(profileState));
@@ -153,6 +175,13 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
           instanceState.stagnationCount = 0;
         }
       }
+    }
+
+    if ((profile.kneeSensitive || profile.hamstringSensitive) && reps.length > 0) {
+      profileState.kneeCheckPending = Boolean(profile.kneeSensitive);
+      profileState.hamstringCheckPending = Boolean(profile.hamstringSensitive);
+      profileState.recoveryCheckPending = true;
+      profileState.pendingLoadIncrease = Boolean(exercise.anchorSession && allAtTop && canChangeLoad);
     }
 
     profileData[profile.id] = profileState;

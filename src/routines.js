@@ -290,6 +290,7 @@ export function createInitialProfileData() {
         kneeCheckPending: false,
         hamstringCheckPending: false,
         recoveryCheckPending: false,
+        pendingLoadIncrease: false,
       },
     ])
   );
@@ -368,6 +369,9 @@ export function migrateState(rawState) {
             old.hamstringCheckPending ||
             migrated.profileData[exercise.profileId].recoveryCheckPending
         ),
+        pendingLoadIncrease: Boolean(
+          old.pendingLoadIncrease || migrated.profileData[exercise.profileId].pendingLoadIncrease
+        ),
       };
     }
   }
@@ -385,6 +389,10 @@ export function migrateState(rawState) {
       recoveryCheckPending: Boolean(current.recoveryCheckPending || current.kneeCheckPending || current.hamstringCheckPending),
       kneeCheckPending: Boolean(current.kneeCheckPending),
       hamstringCheckPending: Boolean(current.hamstringCheckPending),
+      pendingLoadIncrease: Boolean(
+        current.pendingLoadIncrease ??
+          (current.recoveryCheckPending || current.kneeCheckPending || current.hamstringCheckPending)
+      ),
     };
   }
 
