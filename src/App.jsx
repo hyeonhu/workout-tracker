@@ -191,6 +191,12 @@ export default function App() {
   useEffect(() => {
     if (!appState || !history.length || !ownerUid) return;
 
+    const historyKey = `${ownerUid}:${history
+      .map((item) => item.id || item.completedAtLocal || item.localDateKey || item.sessionId)
+      .join("|")}`;
+    if (historyRepairRef.current === historyKey) return;
+    historyRepairRef.current = historyKey;
+
     const repairedState = rebuildStateFromHistory(appState, history);
     const currentSignature = JSON.stringify({
       currentRoutineIndex: appState.currentRoutineIndex,
@@ -206,12 +212,8 @@ export default function App() {
     });
 
     if (currentSignature === repairedSignature) {
-      historyRepairRef.current = repairedSignature;
       return;
     }
-
-    if (historyRepairRef.current === repairedSignature) return;
-    historyRepairRef.current = repairedSignature;
 
     setState(repairedState);
     saveState(repairedState).catch(() => {
