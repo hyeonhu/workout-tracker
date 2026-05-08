@@ -1,6 +1,7 @@
 import {
   ROUTINES,
   SESSION_EXERCISES,
+  createInitialState,
   createInitialInstanceData,
   createInitialProfileData,
   migrateState,
@@ -385,20 +386,25 @@ function resetSiblingInstancesForProfile(profileId, currentExerciseId, instanceD
 }
 
 function createReplaySeed(source) {
+  const base = createInitialProfileData();
   const seed = migrateState({
-    ...source,
+    ...createInitialState(),
     currentRoutineIndex: 0,
     sessionCount: 0,
     updatedAt: source.updatedAt,
+    profileData: Object.fromEntries(
+      Object.entries(base).map(([profileId, profileState]) => [
+        profileId,
+        {
+          ...profileState,
+          incrementStep: Number(
+            source.profileData?.[profileId]?.incrementStep ?? profileState.incrementStep ?? 0
+          ),
+          baseWeight: Number(source.profileData?.[profileId]?.baseWeight ?? profileState.baseWeight ?? 0),
+        },
+      ])
+    ),
   });
-
-  for (const profileId of Object.keys(seed.profileData || {})) {
-    seed.profileData[profileId] = {
-      ...seed.profileData[profileId],
-      incrementStep: Number(source.profileData?.[profileId]?.incrementStep ?? seed.profileData[profileId].incrementStep ?? 0),
-      baseWeight: Number(source.profileData?.[profileId]?.baseWeight ?? seed.profileData[profileId].baseWeight ?? 0),
-    };
-  }
 
   return seed;
 }

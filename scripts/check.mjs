@@ -182,6 +182,7 @@ brokenState.currentRoutineIndex = rebuildSession.nextState.currentRoutineIndex;
 brokenState.sessionCount = rebuildSession.nextState.sessionCount;
 brokenState.profileData.romanian_deadlift.weight = 0;
 brokenState.profileData.romanian_deadlift.initialized = false;
+brokenState.instanceData.b1_romanian_deadlift.stagnationCount = 2;
 brokenState.instanceData.b1_romanian_deadlift.successfulReps = [];
 brokenState.instanceData.b1_romanian_deadlift.targetReps = [10, 10, 10];
 brokenState.instanceData.b1_romanian_deadlift.targetTotal = 30;
@@ -199,6 +200,7 @@ const repairedState = rebuildStateFromHistory(brokenState, [
 assert.equal(repairedState.profileData.romanian_deadlift.weight, 15, "History repair should restore the last logged working weight");
 assert.deepEqual(repairedState.instanceData.b1_romanian_deadlift.successfulReps, [10, 10, 10], "History repair should restore the last successful result");
 assert.deepEqual(repairedState.instanceData.b1_romanian_deadlift.targetReps, [11, 10, 10], "History repair should rebuild the next target from the last successful result");
+assert.equal(repairedState.instanceData.b1_romanian_deadlift.stagnationCount, 0, "History repair should clear stale stall counts when the replayed history does not support them");
 
 const history = [
   {
