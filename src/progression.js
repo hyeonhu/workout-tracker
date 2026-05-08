@@ -67,7 +67,7 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
     const isSuccess = meetsLowerBound && (successfulBaselineTotal === null ? true : totalReps >= successfulBaselineTotal + 1);
     const allAtTop = reps.length > 0 && reps.every((rep) => Number(rep) >= exercise.max);
     const wasExtraSet = instanceState.currentSets > exercise.defaultSets;
-    const canChangeLoad = exercise.anchorSession && profileState.initialized && incrementFor(profileState) > 0;
+    const canChangeLoad = profileState.initialized && incrementFor(profileState) > 0;
     const normalizedTotalLoad = normalizeTotalLoad(profile, loggedWeight, loggedBaseWeight);
 
     historyExercises.push({
@@ -117,7 +117,7 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
           profileState.kneeCheckPending = Boolean(profile.kneeSensitive);
           profileState.hamstringCheckPending = Boolean(profile.hamstringSensitive);
           profileState.recoveryCheckPending = true;
-          profileState.pendingLoadIncrease = Boolean(exercise.anchorSession && canChangeLoad);
+          profileState.pendingLoadIncrease = Boolean(canChangeLoad);
           instanceState.successfulReps = reps;
           instanceState.targetReps = currentTarget;
           instanceState.targetTotal = sum(currentTarget);
@@ -145,7 +145,7 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
 
       if (instanceState.stagnationCount >= 3) {
         if (profile.kneeSensitive || profile.hamstringSensitive) {
-          if (exercise.anchorSession && canChangeLoad) {
+          if (canChangeLoad) {
             profileState.weight = Math.max(0, roundWeight(profileState.weight - incrementFor(profileState)));
             resetSiblingInstancesForProfile(profile.id, exercise.id, instanceData);
           }
@@ -154,14 +154,14 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
           instanceState.targetReps = lowerBoundArray(exercise, exercise.defaultSets);
           instanceState.targetTotal = sum(instanceState.targetReps);
           instanceState.stagnationCount = 0;
-        } else if (profile.category === "upper_main") {
+        } else if (profile.category === "upper_main" || profile.category === "posterior") {
           if (!wasExtraSet) {
             instanceState.currentSets = exercise.defaultSets + 1;
             instanceState.successfulReps = [];
             instanceState.targetReps = lowerBoundArray(exercise, instanceState.currentSets);
             instanceState.targetTotal = sum(instanceState.targetReps);
           } else {
-            if (exercise.anchorSession && canChangeLoad) {
+            if (canChangeLoad) {
               profileState.weight = Math.max(0, roundWeight(profileState.weight - incrementFor(profileState)));
               resetSiblingInstancesForProfile(profile.id, exercise.id, instanceData);
             }
@@ -181,7 +181,7 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
       profileState.kneeCheckPending = Boolean(profile.kneeSensitive);
       profileState.hamstringCheckPending = Boolean(profile.hamstringSensitive);
       profileState.recoveryCheckPending = true;
-      profileState.pendingLoadIncrease = Boolean(exercise.anchorSession && allAtTop && canChangeLoad);
+      profileState.pendingLoadIncrease = Boolean(allAtTop && canChangeLoad);
     }
 
     profileData[profile.id] = profileState;
@@ -240,6 +240,63 @@ export function comparableTarget(exercise, state) {
   const migrated = migrateState(state);
   const current = normalizeInstanceState(migrated.instanceData?.[exercise.id], exercise);
   return Number(current?.targetTotal || sum(defaultTargetReps(exercise, current)));
+}
+
+export function rebuildStateFromHistory(rawState, history = []) {
+  const source = migrateState(rawState);
+  if (!Array.isArray(history) || !history.length) return source;
+
+  const routinesById = new Map(ROUTINES.map((routine) => [routine.id, routine]));
+  const routinesByName = new Map(ROUTINES.map((routine) => [routine.name, routine]));
+  const seenProfiles = new Set();
+  const seenInstances = new Set();
+
+  let replayState = createReplaySeed(source);
+  const orderedHistory = [...history].sort((a, b) => toTimestamp(a) - toTimestamp(b));
+
+  for (const session of orderedHistory) {
+    const routine = routinesById.get(session.sessionId) || routinesByName.get(session.routine);
+    if (!routine) continue;
+
+    const exerciseMap = new Map((session.exercises || []).map((exercise) => [exercise.instanceId || exercise.id, exercise]));
+    const entries = {};
+
+    for (const exercise of routine.exercises) {
+      const logged = exerciseMap.get(exercise.id);
+      if (!logged) {
+        entries[exercise.id] = Array(exercise.defaultSets).fill(exercise.min);
+        continue;
+      }
+
+      const profile = profileById(logged.profileId || exercise.profileId);
+      seenProfiles.add(profile.id);
+      seenInstances.add(exercise.id);
+
+      replayState.profileData[profile.id] = {
+        ...replayState.profileData[profile.id],
+        weight: Number(logged.weight ?? replayState.profileData[profile.id].weight ?? 0),
+        baseWeight: Number(logged.baseWeight ?? replayState.profileData[profile.id].baseWeight ?? profile.baseWeight ?? 0),
+        initialized: Boolean(
+          replayState.profileData[profile.id].initialized ||
+            Number(logged.weight ?? 0) > 0 ||
+            profile.isTime
+        ),
+      };
+
+      entries[exercise.id] = (logged.reps || []).map((value) => Number(value || 0));
+    }
+
+    const approvals = Object.fromEntries(
+      Object.entries(session.recoveryConfirmations || session.kneeConfirmations || {}).map(([exerciseId, value]) => [
+        exerciseId,
+        Boolean(value?.clean),
+      ])
+    );
+
+    replayState = completeSession(replayState, routine, entries, approvals, session.notes || "").nextState;
+  }
+
+  return mergeRebuiltState(source, replayState, seenProfiles, seenInstances);
 }
 
 function normalizeInstanceState(rawInstance, exercise) {
@@ -325,4 +382,63 @@ function resetSiblingInstancesForProfile(profileId, currentExerciseId, instanceD
       currentSets: sessionExercise.defaultSets,
     };
   }
+}
+
+function createReplaySeed(source) {
+  const seed = migrateState({
+    ...source,
+    currentRoutineIndex: 0,
+    sessionCount: 0,
+    updatedAt: source.updatedAt,
+  });
+
+  for (const profileId of Object.keys(seed.profileData || {})) {
+    seed.profileData[profileId] = {
+      ...seed.profileData[profileId],
+      incrementStep: Number(source.profileData?.[profileId]?.incrementStep ?? seed.profileData[profileId].incrementStep ?? 0),
+      baseWeight: Number(source.profileData?.[profileId]?.baseWeight ?? seed.profileData[profileId].baseWeight ?? 0),
+    };
+  }
+
+  return seed;
+}
+
+function mergeRebuiltState(source, rebuilt, seenProfiles, seenInstances) {
+  const nextProfileData = { ...rebuilt.profileData };
+  const nextInstanceData = { ...rebuilt.instanceData };
+
+  for (const [profileId, profileState] of Object.entries(source.profileData || {})) {
+    if (!seenProfiles.has(profileId)) {
+      nextProfileData[profileId] = { ...profileState };
+      continue;
+    }
+
+    nextProfileData[profileId] = {
+      ...nextProfileData[profileId],
+      incrementStep: Number(profileState.incrementStep ?? nextProfileData[profileId].incrementStep ?? 0),
+      baseWeight: Number(profileState.baseWeight ?? nextProfileData[profileId].baseWeight ?? 0),
+    };
+  }
+
+  for (const [instanceId, instanceState] of Object.entries(source.instanceData || {})) {
+    if (!seenInstances.has(instanceId)) {
+      nextInstanceData[instanceId] = { ...instanceState };
+    }
+  }
+
+  return migrateState({
+    ...source,
+    ...rebuilt,
+    profileData: nextProfileData,
+    instanceData: nextInstanceData,
+    recommendationCooldowns: { ...(source.recommendationCooldowns || {}) },
+    updatedAt: source.updatedAt,
+  });
+}
+
+function toTimestamp(session) {
+  const value = session?.completedAtLocal || session?.date || session?.createdAt || 0;
+  if (value?.toDate) return value.toDate().getTime();
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }

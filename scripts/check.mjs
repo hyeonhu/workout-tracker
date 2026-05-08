@@ -10,7 +10,7 @@ import {
   weeklyMuscleVolume,
 } from "../src/analytics.js";
 import { miniWarmupHelperText, warmupHelperText } from "../src/load.js";
-import { completeSession } from "../src/progression.js";
+import { completeSession, rebuildStateFromHistory } from "../src/progression.js";
 import { lastResultReps, lowerBoundReps, nextSuccessReps, nextSuccessTotal } from "../src/progressTargets.js";
 import { ROUTINES, createInitialState, instanceView, migrateState, profileById } from "../src/routines.js";
 
@@ -170,6 +170,35 @@ const pendingIncreaseResult = completeSession(pendingIncreaseState, ROUTINES[2],
 assert.equal(pendingIncreaseResult.nextState.profileData.leg_press.weight, 42.5, "Clean follow-up knee check should move the shared weight up");
 assert.deepEqual(pendingIncreaseResult.nextState.instanceData.a2_leg_press.targetReps, [12, 12], "The session that consumes a pending increase should restart from its own lower bound");
 assert.deepEqual(pendingIncreaseResult.nextState.instanceData.a1_leg_press.targetReps, [10, 10, 10], "Sibling shared sessions should keep their own lower bounds after the shared increase");
+
+const rebuildSeed = createInitialState();
+rebuildSeed.profileData.romanian_deadlift.initialized = true;
+rebuildSeed.profileData.romanian_deadlift.weight = 15;
+const rebuildEntries = Object.fromEntries(ROUTINES[1].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.min)]));
+rebuildEntries.b1_romanian_deadlift = [10, 10, 10];
+const rebuildSession = completeSession(rebuildSeed, ROUTINES[1], rebuildEntries, {});
+const brokenState = createInitialState();
+brokenState.currentRoutineIndex = rebuildSession.nextState.currentRoutineIndex;
+brokenState.sessionCount = rebuildSession.nextState.sessionCount;
+brokenState.profileData.romanian_deadlift.weight = 0;
+brokenState.profileData.romanian_deadlift.initialized = false;
+brokenState.instanceData.b1_romanian_deadlift.successfulReps = [];
+brokenState.instanceData.b1_romanian_deadlift.targetReps = [10, 10, 10];
+brokenState.instanceData.b1_romanian_deadlift.targetTotal = 30;
+const repairedState = rebuildStateFromHistory(brokenState, [
+  {
+    id: "repair-1",
+    sessionId: ROUTINES[1].id,
+    routine: ROUTINES[1].name,
+    date: new Date("2026-05-07T10:00:00+09:00"),
+    exercises: rebuildSession.historyExercises,
+    recoveryConfirmations: {},
+    notes: "",
+  },
+]);
+assert.equal(repairedState.profileData.romanian_deadlift.weight, 15, "History repair should restore the last logged working weight");
+assert.deepEqual(repairedState.instanceData.b1_romanian_deadlift.successfulReps, [10, 10, 10], "History repair should restore the last successful result");
+assert.deepEqual(repairedState.instanceData.b1_romanian_deadlift.targetReps, [11, 10, 10], "History repair should rebuild the next target from the last successful result");
 
 const history = [
   {

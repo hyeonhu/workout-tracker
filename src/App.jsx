@@ -45,7 +45,7 @@ import {
   weeklyDirectHardSets,
   weeklyMuscleVolume,
 } from "./analytics";
-import { applyDeload, completeSession, sum } from "./progression";
+import { applyDeload, completeSession, rebuildStateFromHistory, sum } from "./progression";
 import { formatRepSequence, lastResultReps, nextSuccessReps, nextSuccessTotal } from "./progressTargets.js";
 
 const tabs = [
@@ -82,6 +82,7 @@ export default function App() {
   const previousTabRef = useRef(tab);
   const skipScrollRestoreRef = useRef(false);
   const routinePointerRepairRef = useRef("");
+  const historyRepairRef = useRef("");
   const appState = state ? migrateState(state) : null;
   const routine = ROUTINES[Number(appState?.currentRoutineIndex || 0)] || ROUTINES[0];
   const pendingKnee = appState
@@ -184,6 +185,37 @@ export default function App() {
     setState(repairedState);
     saveState(repairedState).catch(() => {
       routinePointerRepairRef.current = "";
+    });
+  }, [appState, history, ownerUid]);
+
+  useEffect(() => {
+    if (!appState || !history.length || !ownerUid) return;
+
+    const repairedState = rebuildStateFromHistory(appState, history);
+    const currentSignature = JSON.stringify({
+      currentRoutineIndex: appState.currentRoutineIndex,
+      sessionCount: appState.sessionCount,
+      profileData: appState.profileData,
+      instanceData: appState.instanceData,
+    });
+    const repairedSignature = JSON.stringify({
+      currentRoutineIndex: repairedState.currentRoutineIndex,
+      sessionCount: repairedState.sessionCount,
+      profileData: repairedState.profileData,
+      instanceData: repairedState.instanceData,
+    });
+
+    if (currentSignature === repairedSignature) {
+      historyRepairRef.current = repairedSignature;
+      return;
+    }
+
+    if (historyRepairRef.current === repairedSignature) return;
+    historyRepairRef.current = repairedSignature;
+
+    setState(repairedState);
+    saveState(repairedState).catch(() => {
+      historyRepairRef.current = "";
     });
   }, [appState, history, ownerUid]);
 
