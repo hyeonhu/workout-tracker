@@ -121,21 +121,25 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
           profileState.recoveryCheckPending = true;
           profileState.pendingLoadIncrease = Boolean(canChangeLoad);
           instanceState.successfulReps = reps;
+          instanceState.displaySuccessfulReps = reps;
           instanceState.targetReps = currentTarget;
           instanceState.targetTotal = sum(currentTarget);
           instanceState.stagnationCount = 0;
         } else if (canChangeLoad) {
+          instanceState.displaySuccessfulReps = reps;
           profileState.weight = roundWeight(profileState.weight + incrementFor(profileState));
           instanceState = resetInstanceProgress(instanceState, exercise);
           resetSiblingInstancesForProfile(profile.id, exercise.id, instanceData);
         } else {
           instanceState.successfulReps = reps;
+          instanceState.displaySuccessfulReps = reps;
           instanceState.targetReps = buildNextTargetFromSuccessful(reps, exercise.max);
           instanceState.targetTotal = sum(instanceState.targetReps);
           instanceState.stagnationCount = 0;
         }
       } else {
         instanceState.successfulReps = reps;
+        instanceState.displaySuccessfulReps = reps;
         instanceState.targetReps = buildNextTargetFromSuccessful(reps, exercise.max);
         instanceState.targetTotal = sum(instanceState.targetReps);
         instanceState.stagnationCount = 0;
@@ -304,12 +308,14 @@ export function rebuildStateFromHistory(rawState, history = []) {
 function normalizeInstanceState(rawInstance, exercise) {
   const currentSets = Number(rawInstance?.currentSets || exercise.defaultSets);
   const successfulReps = sanitizeReps(rawInstance?.successfulReps, currentSets);
+  const displaySuccessfulReps = sanitizeReps(rawInstance?.displaySuccessfulReps, currentSets);
   const targetReps = sanitizeReps(rawInstance?.targetReps, currentSets);
   const defaultTarget = defaultTargetReps(exercise, { currentSets, successfulReps, targetReps });
   return {
     ...(rawInstance || {}),
     lastReps: sanitizeReps(rawInstance?.lastReps, currentSets),
     successfulReps,
+    displaySuccessfulReps: displaySuccessfulReps.length ? displaySuccessfulReps : successfulReps,
     targetReps: targetReps.length ? targetReps : defaultTarget,
     targetTotal: Number(rawInstance?.targetTotal || sum(targetReps.length ? targetReps : defaultTarget)),
     stagnationCount: Number(rawInstance?.stagnationCount || 0),

@@ -48,6 +48,7 @@ import {
 import { applyDeload, completeSession, rebuildStateFromHistory, sum } from "./progression";
 import { formatRepSequence, lastSuccessfulReps, nextSuccessReps, nextSuccessTotal } from "./progressTargets.js";
 
+const HISTORY_REPAIR_VERSION = "2026-05-13-rep-display-fix";
 const tabs = [
   { id: "today", label: "오늘", icon: Activity },
   { id: "log", label: "기록", icon: ClipboardList },
@@ -191,10 +192,13 @@ export default function App() {
   useEffect(() => {
     if (!appState || !history.length || !ownerUid) return;
 
+    const repairStorageKey = `historyRepair:${HISTORY_REPAIR_VERSION}:${ownerUid}`;
     const historyKey = `${ownerUid}:${history
       .map((item) => item.id || item.completedAtLocal || item.localDateKey || item.sessionId)
       .join("|")}`;
-    if (historyRepairRef.current === historyKey) return;
+    const appliedKey =
+      typeof window !== "undefined" ? window.localStorage.getItem(repairStorageKey) || "" : "";
+    if (historyRepairRef.current === historyKey || appliedKey === historyKey) return;
     historyRepairRef.current = historyKey;
 
     const repairedState = rebuildStateFromHistory(appState, history);
@@ -212,13 +216,18 @@ export default function App() {
     });
 
     if (currentSignature === repairedSignature) {
+      if (typeof window !== "undefined") window.localStorage.setItem(repairStorageKey, historyKey);
       return;
     }
 
     setState(repairedState);
-    saveState(repairedState).catch(() => {
-      historyRepairRef.current = "";
-    });
+    saveState(repairedState)
+      .then(() => {
+        if (typeof window !== "undefined") window.localStorage.setItem(repairStorageKey, historyKey);
+      })
+      .catch(() => {
+        historyRepairRef.current = "";
+      });
   }, [appState, history, ownerUid]);
 
   useEffect(() => {
@@ -1378,22 +1387,22 @@ function PlannedSetBalanceCard() {
 }
 
 function ExerciseCard({ exercise, view, helperText }) {
-  const unit = view.isTime ? "초" : "회";
+  const unit = view.isTime ? "?" : "?";
   const last = lastSuccessfulReps(exercise, view);
   const next = nextSuccessReps(exercise, view);
 
   return (
     <ExerciseLogCard exercise={exercise} view={view}>
       <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-        <Info label="현재" value={view.initialized || view.isTime ? formatWeight(view.weight, view) : "설정 필요"} />
-        <Info label="구성" value={`${view.currentSets || exercise.defaultSets}세트 x ${exercise.min}~${exercise.max}${unit}`} />
-        <Info label="지난 성공" value={formatRepSequence(last)} />
-        <Info label="이번 목표" value={`총 ${nextSuccessTotal(exercise, view)}${unit}+ · ${formatRepSequence(next)}`} />
-        <Info label="정체" value={`${view.stagnationCount || 0}회`} warn={Number(view.stagnationCount || 0) > 0} />
+        <Info label="??" value={view.initialized || view.isTime ? formatWeight(view.weight, view) : "?? ??"} />
+        <Info label="??" value={`${view.currentSets || exercise.defaultSets}?? x ${exercise.min}~${exercise.max}${unit}`} />
+        <Info label="?? ??" value={formatRepSequence(last)} />
+        <Info label="?? ??" value={`? ${nextSuccessTotal(exercise, view)}${unit}+ ? ${formatRepSequence(next)}`} />
+        <Info label="??" value={`${view.stagnationCount || 0}?`} warn={Number(view.stagnationCount || 0) > 0} />
       </div>
       {helperText ? <p className="mt-3 text-sm text-amber-200">{helperText}</p> : null}
-      {view.kneeCheckPending ? <p className="mt-3 rounded-md bg-amber-500/15 px-3 py-2 text-sm text-amber-200">무릎 상태 체크 대기 중</p> : null}
-      {view.hamstringCheckPending ? <p className="mt-3 rounded-md bg-rose-500/15 px-3 py-2 text-sm text-rose-200">햄스트링 상태 체크 대기 중</p> : null}
+      {view.kneeCheckPending ? <p className="mt-3 rounded-md bg-amber-500/15 px-3 py-2 text-sm text-amber-200">?? ?? ?? ?? ?</p> : null}
+      {view.hamstringCheckPending ? <p className="mt-3 rounded-md bg-rose-500/15 px-3 py-2 text-sm text-rose-200">???? ?? ?? ?? ?</p> : null}
     </ExerciseLogCard>
   );
 }

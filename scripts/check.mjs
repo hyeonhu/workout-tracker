@@ -11,7 +11,7 @@ import {
 } from "../src/analytics.js";
 import { miniWarmupHelperText, warmupHelperText } from "../src/load.js";
 import { completeSession, rebuildStateFromHistory } from "../src/progression.js";
-import { lastResultReps, lowerBoundReps, nextSuccessReps, nextSuccessTotal } from "../src/progressTargets.js";
+import { formatRepSequence, lastResultReps, lastSuccessfulReps, lowerBoundReps, nextSuccessReps, nextSuccessTotal } from "../src/progressTargets.js";
 import { ROUTINES, createInitialState, instanceView, migrateState, profileById } from "../src/routines.js";
 
 parse(fs.readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8"), {
@@ -97,6 +97,7 @@ assert.deepEqual(lowerBoundReps(ROUTINES[1].exercises[0], rdlView), [8, 8, 8]);
 assert.deepEqual(lastResultReps(ROUTINES[1].exercises[0], rdlView), [10, 10, 10]);
 assert.deepEqual(nextSuccessReps(ROUTINES[1].exercises[0], rdlView), [11, 10, 10]);
 assert.equal(nextSuccessTotal(ROUTINES[1].exercises[0], rdlView), 31);
+assert.equal(formatRepSequence([11, 9, 8]), "11,9,8");
 
 const inconsistentTargetView = {
   currentSets: 2,
@@ -168,6 +169,34 @@ topOutEntries.b1_romanian_deadlift = [12, 12, 12];
 const topOutResult = completeSession(topOutState, ROUTINES[1], topOutEntries, {});
 assert.equal(topOutResult.nextState.profileData.romanian_deadlift.weight, 17.5, "Top-end success should increase load");
 assert.deepEqual(topOutResult.nextState.instanceData.b1_romanian_deadlift.targetReps, [8, 8, 8], "After load increase, the next target should reset to the lower bound");
+assert.deepEqual(topOutResult.nextState.instanceData.b1_romanian_deadlift.displaySuccessfulReps, [12, 12, 12], "Last successful display reps should survive a load increase");
+
+const neutralLatState = createInitialState();
+neutralLatState.profileData.neutral_lat_pulldown.initialized = true;
+neutralLatState.profileData.neutral_lat_pulldown.weight = 45;
+neutralLatState.instanceData.a2_neutral_lat_pulldown.successfulReps = [11, 12];
+neutralLatState.instanceData.a2_neutral_lat_pulldown.displaySuccessfulReps = [11, 12];
+neutralLatState.instanceData.a2_neutral_lat_pulldown.targetReps = [12, 12];
+neutralLatState.instanceData.a2_neutral_lat_pulldown.targetTotal = 24;
+const neutralLatEntries = Object.fromEntries(ROUTINES[2].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.min)]));
+neutralLatEntries.a2_neutral_lat_pulldown = [12, 12];
+const neutralLatResult = completeSession(neutralLatState, ROUTINES[2], neutralLatEntries, {});
+assert.equal(neutralLatResult.nextState.profileData.neutral_lat_pulldown.weight, 47.5, "Neutral-grip lat pulldown should increase immediately on a top-end success");
+assert.deepEqual(lastSuccessfulReps(ROUTINES[2].exercises[1], neutralLatResult.nextState.instanceData.a2_neutral_lat_pulldown), [12, 12], "Displayed last successful reps should stay at the pre-increase success");
+assert.deepEqual(nextSuccessReps(ROUTINES[2].exercises[1], neutralLatResult.nextState.instanceData.a2_neutral_lat_pulldown), [8, 8], "After the increase, the new target should reset to the lower bound");
+
+const legExtensionState = createInitialState();
+legExtensionState.profileData.leg_extension.initialized = true;
+legExtensionState.profileData.leg_extension.weight = 35;
+legExtensionState.instanceData.a2_leg_extension.successfulReps = [15, 11];
+legExtensionState.instanceData.a2_leg_extension.displaySuccessfulReps = [15, 11];
+legExtensionState.instanceData.a2_leg_extension.targetReps = [15, 12];
+legExtensionState.instanceData.a2_leg_extension.targetTotal = 27;
+const legExtensionEntries = Object.fromEntries(ROUTINES[2].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.min)]));
+legExtensionEntries.a2_leg_extension = [15, 12];
+const legExtensionResult = completeSession(legExtensionState, ROUTINES[2], legExtensionEntries, {});
+assert.deepEqual(lastSuccessfulReps(ROUTINES[2].exercises[4], legExtensionResult.nextState.instanceData.a2_leg_extension), [15, 12], "Sensitive lifts should keep the real last successful reps");
+assert.deepEqual(nextSuccessReps(ROUTINES[2].exercises[4], legExtensionResult.nextState.instanceData.a2_leg_extension), [15, 13], "Sensitive lifts should still advance the displayed target from the real success");
 
 const a2LegPressState = createInitialState();
 a2LegPressState.profileData.leg_press.initialized = true;

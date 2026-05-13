@@ -12,7 +12,12 @@ export function lastResultReps(exercise, view) {
 
 export function lastSuccessfulReps(exercise, view) {
   const fallback = lowerBoundReps(exercise, view);
-  const last = Array.isArray(view?.successfulReps) ? view.successfulReps.map((value) => Number(value || 0)) : [];
+  const source = Array.isArray(view?.displaySuccessfulReps) && view.displaySuccessfulReps.length
+    ? view.displaySuccessfulReps
+    : Array.isArray(view?.successfulReps)
+      ? view.successfulReps
+      : [];
+  const last = source.map((value) => Number(value || 0));
   if (!last.length) return fallback;
   return Array.from({ length: fallback.length }, (_, index) => Number(last[index] || fallback[index] || 0));
 }
@@ -37,7 +42,7 @@ export function nextSuccessTotal(exercise, view) {
   return sumReps(nextSuccessReps(exercise, view));
 }
 
-export function formatRepSequence(values, unit = "?") {
+export function formatRepSequence(values, unit = "") {
   if (!Array.isArray(values) || !values.length) return "-";
   return `${values.join(",")}${unit ? unit : ""}`;
 }

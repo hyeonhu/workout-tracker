@@ -303,6 +303,7 @@ export function createInitialInstanceData() {
       {
         lastReps: [],
         successfulReps: [],
+        displaySuccessfulReps: [],
         targetReps: Array(exercise.defaultSets).fill(exercise.min),
         targetTotal: exercise.defaultSets * exercise.min,
         stagnationCount: 0,
@@ -347,6 +348,7 @@ export function migrateState(rawState) {
         ...migrated.instanceData[exercise.id],
         lastReps: old.lastReps || [],
         successfulReps: old.successfulReps || old.lastReps || [],
+        displaySuccessfulReps: old.displaySuccessfulReps || old.successfulReps || old.lastReps || [],
         targetReps: old.targetReps || buildLegacyTargetReps(old.lastReps, exercise),
         targetTotal: Number(old.targetTotal || exercise.defaultSets * exercise.min),
         stagnationCount: Number(old.stagnationCount || 0),
@@ -407,6 +409,13 @@ export function migrateState(rawState) {
         : Array.isArray(current.lastReps)
           ? current.lastReps
           : [],
+      displaySuccessfulReps: Array.isArray(current.displaySuccessfulReps)
+        ? current.displaySuccessfulReps
+        : Array.isArray(current.successfulReps)
+          ? current.successfulReps
+          : Array.isArray(current.lastReps)
+            ? current.lastReps
+            : [],
       targetReps: Array.isArray(current.targetReps) && current.targetReps.length
         ? current.targetReps
         : buildLegacyTargetReps(
