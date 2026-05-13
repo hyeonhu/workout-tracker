@@ -46,7 +46,7 @@ import {
   weeklyMuscleVolume,
 } from "./analytics";
 import { applyDeload, completeSession, rebuildStateFromHistory, sum } from "./progression";
-import { formatRepSequence, lastResultReps, nextSuccessReps, nextSuccessTotal } from "./progressTargets.js";
+import { formatRepSequence, lastSuccessfulReps, nextSuccessReps, nextSuccessTotal } from "./progressTargets.js";
 
 const tabs = [
   { id: "today", label: "오늘", icon: Activity },
@@ -1378,26 +1378,25 @@ function PlannedSetBalanceCard() {
 }
 
 function ExerciseCard({ exercise, view, helperText }) {
-  const unit = view.isTime ? "초" : "회";
-  const last = lastResultReps(exercise, view);
+  const unit = view.isTime ? "?" : "?";
+  const last = lastSuccessfulReps(exercise, view);
   const next = nextSuccessReps(exercise, view);
 
   return (
     <ExerciseLogCard exercise={exercise} view={view}>
       <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-        <Info label="현재" value={view.initialized || view.isTime ? formatWeight(view.weight, view) : "설정 필요"} />
-        <Info label="구성" value={`${view.currentSets || exercise.defaultSets}세트 x ${exercise.min}~${exercise.max}${unit}`} />
-        <Info label="지난 기록" value={formatRepSequence(last)} />
-        <Info label="다음 성공" value={`총 ${nextSuccessTotal(exercise, view)}${unit}+ · ${formatRepSequence(next)}`} />
-        <Info label="정체" value={`${view.stagnationCount || 0}회`} warn={Number(view.stagnationCount || 0) > 0} />
+        <Info label="??" value={view.initialized || view.isTime ? formatWeight(view.weight, view) : "?? ??"} />
+        <Info label="??" value={`${view.currentSets || exercise.defaultSets}?? x ${exercise.min}~${exercise.max}${unit}`} />
+        <Info label="?? ??" value={formatRepSequence(last)} />
+        <Info label="?? ??" value={`? ${nextSuccessTotal(exercise, view)}${unit}+ ? ${formatRepSequence(next)}`} />
+        <Info label="??" value={`${view.stagnationCount || 0}?`} warn={Number(view.stagnationCount || 0) > 0} />
       </div>
       {helperText ? <p className="mt-3 text-sm text-amber-200">{helperText}</p> : null}
-      {view.kneeCheckPending ? <p className="mt-3 rounded-md bg-amber-500/15 px-3 py-2 text-sm text-amber-200">무릎 상태 체크 대기 중</p> : null}
-      {view.hamstringCheckPending ? <p className="mt-3 rounded-md bg-rose-500/15 px-3 py-2 text-sm text-rose-200">햄스트링 상태 체크 대기 중</p> : null}
+      {view.kneeCheckPending ? <p className="mt-3 rounded-md bg-amber-500/15 px-3 py-2 text-sm text-amber-200">?? ?? ?? ?? ?</p> : null}
+      {view.hamstringCheckPending ? <p className="mt-3 rounded-md bg-rose-500/15 px-3 py-2 text-sm text-rose-200">???? ?? ?? ?? ?</p> : null}
     </ExerciseLogCard>
   );
 }
-
 function ExerciseLogCard({ exercise, view, children }) {
   const meta = CATEGORY_META[view.category];
   return (

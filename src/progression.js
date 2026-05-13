@@ -4,6 +4,7 @@ import {
   createInitialState,
   createInitialInstanceData,
   createInitialProfileData,
+  legacyIdFor,
   migrateState,
   profileById,
 } from "./routines.js";
@@ -259,11 +260,11 @@ export function rebuildStateFromHistory(rawState, history = []) {
     const routine = routinesById.get(session.sessionId) || routinesByName.get(session.routine);
     if (!routine) continue;
 
-    const exerciseMap = new Map((session.exercises || []).map((exercise) => [exercise.instanceId || exercise.id, exercise]));
+    const loggedExercises = session.exercises || [];
     const entries = {};
 
     for (const exercise of routine.exercises) {
-      const logged = exerciseMap.get(exercise.id);
+      const logged = findLoggedExercise(loggedExercises, exercise);
       if (!logged) {
         entries[exercise.id] = Array(exercise.defaultSets).fill(exercise.min);
         continue;
@@ -447,4 +448,12 @@ function toTimestamp(session) {
   if (value?.toDate) return value.toDate().getTime();
   const timestamp = new Date(value).getTime();
   return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function findLoggedExercise(loggedExercises, exercise) {
+  const candidateIds = new Set([exercise.id, legacyIdFor(exercise), exercise.profileId]);
+  return (loggedExercises || []).find((logged) => {
+    const loggedIds = [logged?.instanceId, logged?.id, logged?.profileId].filter(Boolean);
+    return loggedIds.some((value) => candidateIds.has(value));
+  });
 }

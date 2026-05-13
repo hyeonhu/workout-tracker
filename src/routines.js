@@ -511,7 +511,7 @@ function inst(id, profileId, defaultSets, min, max, anchorSession) {
   return { id, profileId, defaultSets, min, max, anchorSession };
 }
 
-function legacyIdFor(exercise) {
+export function legacyIdFor(exercise) {
   const map = {
     a1_bench_press: "bench_press",
     a1_lat_pulldown: "lat_pulldown",

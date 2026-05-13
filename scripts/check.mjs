@@ -89,6 +89,7 @@ assert.equal(miniWarmupHelperText(ROUTINES[3].exercises[6]), "웜업: 동적 준
 const rdlView = {
   currentSets: 3,
   lastReps: [10, 10, 10],
+  successfulReps: [10, 10, 10],
   targetReps: [11, 10, 10],
   isTime: false,
 };
@@ -96,6 +97,32 @@ assert.deepEqual(lowerBoundReps(ROUTINES[1].exercises[0], rdlView), [8, 8, 8]);
 assert.deepEqual(lastResultReps(ROUTINES[1].exercises[0], rdlView), [10, 10, 10]);
 assert.deepEqual(nextSuccessReps(ROUTINES[1].exercises[0], rdlView), [11, 10, 10]);
 assert.equal(nextSuccessTotal(ROUTINES[1].exercises[0], rdlView), 31);
+
+const inconsistentTargetView = {
+  currentSets: 2,
+  lastReps: [10, 10],
+  successfulReps: [10, 10],
+  targetReps: [10, 10],
+  isTime: false,
+};
+assert.deepEqual(
+  nextSuccessReps(ROUTINES[3].exercises[4], inconsistentTargetView),
+  [11, 10],
+  "The displayed next target should be rebuilt from the previous record when the stored target is stale"
+);
+
+const resetTargetView = {
+  currentSets: 3,
+  lastReps: [12, 12, 12],
+  successfulReps: [12, 12, 12],
+  targetReps: [8, 8, 8],
+  isTime: false,
+};
+assert.deepEqual(
+  nextSuccessReps(ROUTINES[1].exercises[0], resetTargetView),
+  [8, 8, 8],
+  "A lower-bound reset after load increase should stay intact"
+);
 
 const targetState = createInitialState();
 targetState.profileData.romanian_deadlift.initialized = true;
@@ -201,6 +228,30 @@ assert.equal(repairedState.profileData.romanian_deadlift.weight, 15, "History re
 assert.deepEqual(repairedState.instanceData.b1_romanian_deadlift.successfulReps, [10, 10, 10], "History repair should restore the last successful result");
 assert.deepEqual(repairedState.instanceData.b1_romanian_deadlift.targetReps, [11, 10, 10], "History repair should rebuild the next target from the last successful result");
 assert.equal(repairedState.instanceData.b1_romanian_deadlift.stagnationCount, 0, "History repair should clear stale stall counts when the replayed history does not support them");
+
+const legacyHistoryState = createInitialState();
+const legacyHistoryRepaired = rebuildStateFromHistory(legacyHistoryState, [
+  {
+    id: "legacy-b2",
+    sessionId: "b2",
+    routine: "B2",
+    date: new Date("2026-05-07T18:00:00+09:00"),
+    exercises: [
+      { id: "hip_thrust", profileId: "hip_thrust", weight: 40, reps: [8, 8, 8], totalReps: 24, baseWeight: 20 },
+      { id: "chest_supported_row", profileId: "chest_supported_row", weight: 14, reps: [8, 8, 8], totalReps: 24 },
+      { id: "lat_pulldown_b2", profileId: "lat_pulldown", weight: 45, reps: [10, 10], totalReps: 20 },
+      { id: "leg_curl_b2", profileId: "leg_curl", weight: 30, reps: [10, 10], totalReps: 20 },
+      { id: "hammer_curl", profileId: "hammer_curl", weight: 10, reps: [10, 10], totalReps: 20 },
+      { id: "overhead_triceps_extension", profileId: "overhead_triceps_extension", weight: 20, reps: [10, 10], totalReps: 20 },
+      { id: "plank", profileId: "plank", weight: 0, reps: [30, 30], totalReps: 60 },
+    ],
+    recoveryConfirmations: {},
+    notes: "",
+  },
+]);
+assert.equal(legacyHistoryRepaired.profileData.smith_hip_thrust.weight, 40, "Legacy hip thrust history should map to smith hip thrust");
+assert.deepEqual(legacyHistoryRepaired.instanceData.b2_hammer_curl.successfulReps, [10, 10], "Legacy hammer curl history should map to the current instance");
+assert.deepEqual(legacyHistoryRepaired.instanceData.b2_hammer_curl.targetReps, [11, 10], "Legacy hammer curl history should rebuild the current target correctly");
 
 const history = [
   {
