@@ -37,7 +37,7 @@ export function nextSuccessTotal(exercise, view) {
   return sumReps(nextSuccessReps(exercise, view));
 }
 
-export function formatRepSequence(values, unit = "회") {
+export function formatRepSequence(values, unit = "?") {
   if (!Array.isArray(values) || !values.length) return "-";
   return `${values.join(",")}${unit ? unit : ""}`;
 }
