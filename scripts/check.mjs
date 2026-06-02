@@ -10,7 +10,13 @@ import {
   weeklyMuscleVolume,
 } from "../src/analytics.js";
 import { miniWarmupHelperText, warmupHelperText } from "../src/load.js";
-import { completeSession, rebuildStateFromHistory } from "../src/progression.js";
+import {
+  completeSession,
+  getSessionDeload,
+  rebuildStateFromHistory,
+  schedulePlateauDeload,
+  startConditionDeload,
+} from "../src/progression.js";
 import { formatRepSequence, lastResultReps, lastSuccessfulReps, lowerBoundReps, nextSuccessReps, nextSuccessTotal } from "../src/progressTargets.js";
 import { ROUTINES, createInitialState, instanceView, migrateState, profileById } from "../src/routines.js";
 
@@ -227,6 +233,30 @@ assert.equal(pendingIncreaseResult.nextState.profileData.leg_press.weight, 42.5,
 assert.deepEqual(pendingIncreaseResult.nextState.instanceData.a2_leg_press.targetReps, [12, 12], "The session that consumes a pending increase should restart from its own lower bound");
 assert.deepEqual(pendingIncreaseResult.nextState.instanceData.a1_leg_press.targetReps, [10, 10, 10], "Sibling shared sessions should keep their own lower bounds after the shared increase");
 
+const conditionDeloadState = startConditionDeload(successState, ROUTINES[1].id);
+const conditionDeload = getSessionDeload(conditionDeloadState, ROUTINES[1]);
+assert.equal(conditionDeload.type, "condition", "Manual deload should create a condition deload for the current session");
+const conditionDeloadResult = completeSession(conditionDeloadState, ROUTINES[1], successEntries, {});
+assert.equal(conditionDeloadResult.nextState.deload.mode, "none", "Condition deload should end after one session");
+assert.deepEqual(conditionDeloadResult.nextState.instanceData.b1_romanian_deadlift.successfulReps, [10, 10, 10], "Condition deload must not replace progression baselines");
+assert.deepEqual(conditionDeloadResult.nextState.instanceData.b1_romanian_deadlift.targetReps, [11, 10, 10], "Condition deload must not create a new target");
+assert.equal(conditionDeloadResult.nextState.instanceData.b1_romanian_deadlift.currentSets, 3, "Condition deload must not reduce stored set count");
+
+const oldDestructiveDeloadState = createInitialState();
+oldDestructiveDeloadState.instanceData.b2_hammer_curl.currentSets = 1;
+assert.equal(migrateState(oldDestructiveDeloadState).instanceData.b2_hammer_curl.currentSets, 2, "Old destructive deload set counts should recover to the planned set count");
+
+let plateauState = schedulePlateauDeload(createInitialState());
+assert.equal(getSessionDeload(plateauState, ROUTINES[1]), null, "Scheduled plateau deload should wait until A1");
+assert.equal(getSessionDeload(plateauState, ROUTINES[0]).type, "plateau", "Scheduled plateau deload should start at A1");
+plateauState.instanceData.a1_bench_press.stagnationCount = 2;
+for (const routine of ROUTINES) {
+  const deloadEntries = Object.fromEntries(routine.exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.min)]));
+  plateauState = completeSession(plateauState, routine, deloadEntries, {}).nextState;
+}
+assert.equal(plateauState.deload.mode, "none", "Plateau deload should end after one full A1-B1-A2-B2 cycle");
+assert.equal(plateauState.instanceData.a1_bench_press.stagnationCount, 0, "Plateau deload should reset stall counters after completion");
+
 const rebuildSeed = createInitialState();
 rebuildSeed.profileData.romanian_deadlift.initialized = true;
 rebuildSeed.profileData.romanian_deadlift.weight = 15;
@@ -289,10 +319,19 @@ const history = [
     routine: "A1",
     exercises: [{ id: "bench_press", profileId: "bench_press", weight: 50, totalReps: 30, reps: [10, 10, 10] }],
   },
+  {
+    id: "h-deload",
+    date: new Date(),
+    routine: "A1",
+    isDeload: true,
+    deloadType: "condition",
+    exercises: [{ id: "bench_press", profileId: "bench_press", weight: 30, totalReps: 24, reps: [8, 8, 8] }],
+  },
 ];
 assert.equal(weeklyMuscleVolume(history, 2).at(-1).muscles.chest, 3600);
 assert.equal(progressionSeries(history, ["bench_press"])[0].points[0].metricLabel, "e1RM");
 assert.equal(progressionSeries(history, ["bench_press"])[0].points[0].normalizedTotalLoad, 120);
+assert.equal(progressionSeries(history, ["bench_press"])[0].points.length, 1, "Deload sessions should not appear in progression charts");
 assert.equal(
   bodyweightWeeklyAverage(
     [

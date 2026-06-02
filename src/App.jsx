@@ -13,7 +13,7 @@ import {
   Settings,
   ShieldCheck,
 } from "lucide-react";
-import { addDoc, collection, doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
+import { addDoc, collection, deleteDoc, doc, getDoc, onSnapshot, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { db, ensureAnonymousUser } from "./firebase";
 import {
   CATEGORY_META,
@@ -45,10 +45,21 @@ import {
   weeklyDirectHardSets,
   weeklyMuscleVolume,
 } from "./analytics";
-import { applyDeload, completeSession, rebuildStateFromHistory, sum } from "./progression";
+import {
+  cancelConditionDeload,
+  cancelScheduledPlateauDeload,
+  completeSession,
+  deloadEntryWeight,
+  deloadTargetReps,
+  endPlateauDeload,
+  getSessionDeload,
+  rebuildStateFromHistory,
+  startConditionDeload,
+  sum,
+} from "./progression";
 import { formatRepSequence, lastSuccessfulReps, nextSuccessReps, nextSuccessTotal } from "./progressTargets.js";
 
-const HISTORY_REPAIR_VERSION = "2026-05-13-rep-display-fix";
+const HISTORY_REPAIR_VERSION = "2026-06-02-deload-overlay";
 const tabs = [
   { id: "today", label: "오늘", icon: Activity },
   { id: "log", label: "기록", icon: ClipboardList },
@@ -86,8 +97,11 @@ export default function App() {
   const historyRepairRef = useRef("");
   const appState = state ? migrateState(state) : null;
   const routine = ROUTINES[Number(appState?.currentRoutineIndex || 0)] || ROUTINES[0];
+  const sessionDeload = appState ? getSessionDeload(appState, routine) : null;
   const pendingKnee = appState
-    ? routine.exercises.filter((exercise) => {
+    ? sessionDeload
+      ? []
+      : routine.exercises.filter((exercise) => {
         const profile = profileById(exercise.profileId);
         const view = instanceView(exercise, appState);
         return (profile.kneeSensitive || profile.hamstringSensitive) && view.recoveryCheckPending;
@@ -194,7 +208,13 @@ export default function App() {
 
     const repairStorageKey = `historyRepair:${HISTORY_REPAIR_VERSION}:${ownerUid}`;
     const historyKey = `${ownerUid}:${history
-      .map((item) => item.id || item.completedAtLocal || item.localDateKey || item.sessionId)
+      .map((item) => {
+        const exerciseKey = (item.exercises || [])
+          .map((exercise) => `${exercise.id || exercise.instanceId}:${exercise.weight}:${(exercise.reps || []).join(",")}`)
+          .join(";");
+        const editedAt = item.editedAt?.seconds || item.editedAt || "";
+        return `${item.id || item.completedAtLocal || item.localDateKey || item.sessionId}:${editedAt}:${exerciseKey}`;
+      })
       .join("|")}`;
     const appliedKey =
       typeof window !== "undefined" ? window.localStorage.getItem(repairStorageKey) || "" : "";
@@ -205,12 +225,14 @@ export default function App() {
     const currentSignature = JSON.stringify({
       currentRoutineIndex: appState.currentRoutineIndex,
       sessionCount: appState.sessionCount,
+      deload: appState.deload,
       profileData: appState.profileData,
       instanceData: appState.instanceData,
     });
     const repairedSignature = JSON.stringify({
       currentRoutineIndex: repairedState.currentRoutineIndex,
       sessionCount: repairedState.sessionCount,
+      deload: repairedState.deload,
       profileData: repairedState.profileData,
       instanceData: repairedState.instanceData,
     });
@@ -256,9 +278,9 @@ export default function App() {
     if (!appState) return;
     const nextEntries = {};
     for (const exercise of routine.exercises) {
-      const view = instanceView(exercise, appState);
+      const view = exerciseSessionView(exercise, appState, sessionDeload);
       const sets = Number(view.currentSets || exercise.defaultSets);
-      const suggested = nextSuccessReps(exercise, view);
+      const suggested = sessionDeload ? deloadTargetReps(exercise) : nextSuccessReps(exercise, view);
       const source = suggested.length ? suggested : view.lastReps?.length ? view.lastReps : Array(sets).fill(exercise.min);
       nextEntries[exercise.id] = Array.from({ length: sets }, (_, index) => Number(source[index] || exercise.min));
     }
@@ -267,7 +289,7 @@ export default function App() {
     setSessionNotes("");
     setSessionBodyweight("");
     setSessionBodyweightContext("post_workout");
-  }, [appState?.currentRoutineIndex, appState?.sessionCount]);
+  }, [appState?.currentRoutineIndex, appState?.sessionCount, appState?.deload?.mode, sessionDeload?.type, sessionDeload?.remainingSessions]);
 
   async function saveState(nextState) {
     if (!ownerUid) return;
@@ -313,6 +335,9 @@ export default function App() {
         routine: routine.name,
         routineTitle: routine.title,
         notes: result.notes,
+        isDeload: Boolean(result.deload),
+        deloadType: result.deload?.type || null,
+        deloadFactor: result.deload?.factor || null,
         kneeConfirmations: result.kneeConfirmations,
         recoveryConfirmations: result.recoveryConfirmations,
         exercises: result.historyExercises,
@@ -429,9 +454,70 @@ export default function App() {
   }
 
   async function manualDeload() {
-    const nextState = applyDeload(appState);
-    await saveState({ ...nextState, lastDeloadAt: Date.now() });
-    setStatus("디로드 적용됨");
+    const nextState = startConditionDeload(appState, routine.id);
+    setState(nextState);
+    await saveState(nextState);
+    setStatus("이번 세션 디로드 적용됨");
+  }
+
+  async function cancelDeload() {
+    const nextState =
+      appState.deload?.mode === "condition"
+        ? cancelConditionDeload(appState)
+        : appState.deload?.mode === "plateau_scheduled"
+          ? cancelScheduledPlateauDeload(appState)
+          : endPlateauDeload(appState);
+    setState(nextState);
+    await saveState(nextState);
+    setStatus("디로드 취소됨");
+  }
+
+  async function deleteHistorySession(session) {
+    if (!ownerUid || !session?.id) return;
+    if (!confirm("이 세션 기록을 삭제할까요? 삭제 후 진행 상태는 히스토리 기준으로 다시 계산됩니다.")) return;
+    await deleteDoc(doc(db, "users", ownerUid, "history", session.id));
+    setStatus("기록 삭제됨");
+  }
+
+  async function editHistoryExercise(session, exercise) {
+    if (!ownerUid || !session?.id || !exercise) return;
+    const nextRepsText = prompt("반복수를 쉼표로 입력해줘. 예: 10,10,9", (exercise.reps || []).join(","));
+    if (nextRepsText === null) return;
+    const nextReps = nextRepsText
+      .split(",")
+      .map((value) => Number(value.trim()))
+      .filter((value) => Number.isFinite(value) && value >= 0);
+    if (!nextReps.length) return;
+
+    const nextWeightText = prompt("중량을 입력해줘. 기존 표시 방식 그대로 입력하면 돼.", String(exercise.weight ?? 0));
+    if (nextWeightText === null) return;
+    const nextWeight = Number(nextWeightText || 0);
+    const profile = profileById(exercise.profileId);
+    const baseWeight = Number(exercise.baseWeight ?? profile?.baseWeight ?? 0);
+    const normalizedTotalLoad = normalizeTotalLoad(profile, nextWeight, baseWeight);
+    const nextExercises = (session.exercises || []).map((item) => {
+      if (item.id !== exercise.id && item.instanceId !== exercise.instanceId) return item;
+      return {
+        ...item,
+        weight: nextWeight,
+        normalizedTotalLoad,
+        reps: nextReps,
+        totalReps: sum(nextReps),
+        sets: nextReps.map((rep, index) => ({
+          ...(item.sets?.[index] || {}),
+          set: index + 1,
+          reps: rep,
+          weight: nextWeight,
+          baseWeight,
+          normalizedTotalLoad,
+        })),
+      };
+    });
+    await updateDoc(doc(db, "users", ownerUid, "history", session.id), {
+      exercises: nextExercises,
+      editedAt: serverTimestamp(),
+    });
+    setStatus("기록 수정됨");
   }
 
   if (!appState) {
@@ -464,6 +550,7 @@ export default function App() {
           <TodayView
             state={appState}
             currentRoutine={routine}
+            sessionDeload={sessionDeload}
             openSections={todayOpenSections}
             setOpenSections={setTodayOpenSections}
             onLog={(exerciseId = "") => {
@@ -471,12 +558,15 @@ export default function App() {
               changeTab("log", { restoreScroll: !exerciseId });
             }}
             onSettings={() => changeTab("settings")}
+            onConditionDeload={manualDeload}
+            onCancelDeload={cancelDeload}
           />
         )}
         {tab === "log" && (
           <LogView
             state={appState}
             routine={routine}
+            sessionDeload={sessionDeload}
             entries={entries}
             setEntries={setEntries}
             pendingKnee={pendingKnee}
@@ -505,6 +595,8 @@ export default function App() {
             setAnalyticsOpen={setHistoryAnalyticsOpen}
             onRecommendationCooldown={saveRecommendationCooldown}
             onBodyweight={addBodyweight}
+            onDeleteSession={deleteHistorySession}
+            onEditExercise={editHistoryExercise}
           />
         )}
         {tab === "settings" && (
@@ -524,6 +616,7 @@ export default function App() {
             onlyToday={settingsOnlyToday}
             setOnlyToday={setSettingsOnlyToday}
             onDeload={manualDeload}
+            onCancelDeload={cancelDeload}
             onReset={resetAll}
             busy={busy}
           />
@@ -552,7 +645,7 @@ export default function App() {
   );
 }
 
-function TodayView({ state, currentRoutine, openSections, setOpenSections, onLog, onSettings }) {
+function TodayView({ state, currentRoutine, sessionDeload, openSections, setOpenSections, onLog, onSettings, onConditionDeload, onCancelDeload }) {
 
   useEffect(() => {
     setOpenSections((prev) => (Object.keys(prev).length ? prev : { [currentRoutine.id]: true }));
@@ -576,11 +669,20 @@ function TodayView({ state, currentRoutine, openSections, setOpenSections, onLog
         </button>
       </div>
 
+      <DeloadControlCard
+        state={state}
+        routine={currentRoutine}
+        sessionDeload={sessionDeload}
+        onConditionDeload={onConditionDeload}
+        onCancelDeload={onCancelDeload}
+      />
+
       {ROUTINES.map((routine) => (
         <SessionAccordion
           key={routine.id}
           routine={routine}
           state={state}
+          sessionDeload={routine.id === currentRoutine.id ? sessionDeload : null}
           open={Boolean(openSections[routine.id])}
           current={routine.id === currentRoutine.id}
           onToggle={() => setOpenSections((prev) => ({ ...prev, [routine.id]: !prev[routine.id] }))}
@@ -591,10 +693,10 @@ function TodayView({ state, currentRoutine, openSections, setOpenSections, onLog
   );
 }
 
-function SessionAccordion({ routine, state, open, current, onToggle, onExerciseTap }) {
+function SessionAccordion({ routine, state, sessionDeload, open, current, onToggle, onExerciseTap }) {
   const summary = sessionSummary(routine);
   const firstExercise = routine.exercises[0];
-  const firstView = firstExercise ? instanceView(firstExercise, state) : null;
+  const firstView = firstExercise ? exerciseSessionView(firstExercise, state, sessionDeload) : null;
   const warmupText = current && firstView ? warmupHelperText(firstExercise, firstView) : null;
   return (
     <article className={`overflow-hidden rounded-lg border bg-app-card transition ${current ? "border-app-accent" : "border-app-line"}`}>
@@ -626,7 +728,7 @@ function SessionAccordion({ routine, state, open, current, onToggle, onExerciseT
             <button key={exercise.id} onClick={() => onExerciseTap(exercise.id)} className="block w-full text-left">
               <ExerciseCard
                 exercise={exercise}
-                view={instanceView(exercise, state)}
+                view={exerciseSessionView(exercise, state, sessionDeload)}
                 helperText={current && index > 0 ? miniWarmupHelperText(exercise) : null}
               />
             </button>
@@ -637,9 +739,72 @@ function SessionAccordion({ routine, state, open, current, onToggle, onExerciseT
   );
 }
 
+function DeloadControlCard({ state, routine, sessionDeload, onConditionDeload, onCancelDeload }) {
+  const mode = state.deload?.mode || "none";
+  const scheduled = mode === "plateau_scheduled" && !sessionDeload;
+  const activePlateau = sessionDeload?.type === "plateau";
+  const activeCondition = sessionDeload?.type === "condition";
+
+  if (!scheduled && !activePlateau && !activeCondition) {
+    return (
+      <div className="rounded-lg border border-app-line bg-app-card p-4">
+        <button onClick={onConditionDeload} className="flex w-full items-center justify-center gap-2 rounded-md border border-app-line py-3 font-bold text-white">
+          <RotateCcw className="h-4 w-4" />
+          이번 세션 디로드
+        </button>
+      </div>
+    );
+  }
+
+  const title = activeCondition
+    ? "컨디션 디로드 적용 중"
+    : activePlateau
+      ? `정체 디로드 진행 중 (${sessionDeload.remainingSessions}세션 남음)`
+      : "정체 디로드 예약됨";
+  const text = activeCondition
+    ? "이번 세션만 70% 중량과 하한 반복수로 진행하고, 다음 세션은 정상으로 돌아갑니다."
+    : activePlateau
+      ? "65% 중량으로 한 사이클을 진행합니다. 정상 중량과 목표는 저장된 상태 그대로 보존됩니다."
+      : "다음 A1부터 4세션 정체 디로드가 시작됩니다. 시작 전에는 예약을 취소할 수 있습니다.";
+
+  return (
+    <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-bold text-amber-100">{title}</h2>
+          <p className="mt-1 text-sm leading-5 text-amber-100/80">{text}</p>
+        </div>
+        <span className="shrink-0 rounded-md bg-amber-500 px-2 py-1 text-xs font-bold text-black">
+          {activeCondition ? "70%" : "65%"}
+        </span>
+      </div>
+      <button onClick={onCancelDeload} className="mt-3 w-full rounded-md border border-amber-500/40 py-3 font-bold text-amber-100">
+        {scheduled ? "예약 취소" : "디로드 취소"}
+      </button>
+    </div>
+  );
+}
+
+function exerciseSessionView(exercise, state, sessionDeload) {
+  const view = instanceView(exercise, state);
+  if (!sessionDeload) return view;
+  const targetReps = deloadTargetReps(exercise);
+  return {
+    ...view,
+    weight: deloadEntryWeight(profileById(exercise.profileId), view, sessionDeload),
+    normalWeight: view.weight,
+    currentSets: exercise.defaultSets,
+    targetReps,
+    targetTotal: sum(targetReps),
+    isDeload: true,
+    deloadType: sessionDeload.type,
+  };
+}
+
 function LogView({
   state,
   routine,
+  sessionDeload,
   entries,
   setEntries,
   pendingKnee,
@@ -674,6 +839,12 @@ function LogView({
         <p className="text-sm text-app-muted">{routine.day}요일 · {routine.title}</p>
       </div>
 
+      {sessionDeload ? (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-100">
+          {sessionDeload.type === "condition" ? "컨디션 디로드" : "정체 디로드"} · 중량 {Math.round(sessionDeload.factor * 100)}% · 목표는 하한 반복수만 적용됩니다.
+        </div>
+      ) : null}
+
       {pendingKnee.length > 0 && (
         <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
           <h2 className="font-bold text-amber-100">회복 상태 체크</h2>
@@ -698,7 +869,7 @@ function LogView({
       )}
 
       {routine.exercises.map((exercise) => {
-        const view = instanceView(exercise, state);
+        const view = exerciseSessionView(exercise, state, sessionDeload);
         const reps = entries[exercise.id] || [];
         return (
           <div key={exercise.id} id={`log-${exercise.id}`} className="scroll-mt-24">
@@ -820,7 +991,7 @@ function SessionDraftSummary({ summary }) {
   );
 }
 
-function HistoryView({ history, bodyweightLogs, recommendationCooldowns, openDates, setOpenDates, analyticsOpen, setAnalyticsOpen, onRecommendationCooldown, onBodyweight }) {
+function HistoryView({ history, bodyweightLogs, recommendationCooldowns, openDates, setOpenDates, analyticsOpen, setAnalyticsOpen, onRecommendationCooldown, onBodyweight, onDeleteSession, onEditExercise }) {
   const groups = useMemo(() => groupHistoryByDate(history), [history]);
 
   if (!history.length) {
@@ -872,7 +1043,7 @@ function HistoryView({ history, bodyweightLogs, recommendationCooldowns, openDat
           {openDates[group.key] && (
             <div className="space-y-3 border-t border-app-line p-4">
               {group.sessions.map((session) => (
-                <SessionHistoryCard key={session.id} session={session} />
+                <SessionHistoryCard key={session.id} session={session} onDelete={onDeleteSession} onEditExercise={onEditExercise} />
               ))}
             </div>
           )}
@@ -1294,7 +1465,7 @@ function SettingsView({
         <div className="mt-4 grid grid-cols-2 gap-2">
           <button onClick={onDeload} className="flex items-center justify-center gap-2 rounded-md border border-app-line py-3 font-bold text-white">
             <RotateCcw className="h-4 w-4" />
-            디로드
+            이번 세션 디로드
           </button>
           <button onClick={onReset} className="rounded-md border border-red-500/50 py-3 font-bold text-red-200">
             전체 초기화
@@ -1653,15 +1824,23 @@ function SettingsSessionAccordion({ routine, state, open, onToggle, onProfile })
   );
 }
 
-function SessionHistoryCard({ session }) {
+function SessionHistoryCard({ session, onDelete, onEditExercise }) {
   return (
     <div className="rounded-md bg-app-bg p-3">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <h3 className="font-bold text-white">{session.routine}</h3>
+          <h3 className="font-bold text-white">
+            {session.routine}
+            {session.isDeload || session.deloadType ? <span className="ml-2 rounded-md bg-amber-500 px-2 py-1 text-xs text-black">디로드</span> : null}
+          </h3>
           <p className="mt-1 text-xs text-app-muted">{formatDate(session.date)}</p>
         </div>
-        <span className="text-sm font-bold text-white">{formatNumber(sessionVolume(session))}</span>
+        <div className="text-right">
+          <span className="block text-sm font-bold text-white">{formatNumber(sessionVolume(session))}</span>
+          <button onClick={() => onDelete?.(session)} className="mt-2 rounded-md border border-red-500/40 px-2 py-1 text-xs font-bold text-red-200">
+            삭제
+          </button>
+        </div>
       </div>
       {session.notes ? <p className="mt-3 rounded-md bg-app-card px-3 py-2 text-sm text-app-muted">{session.notes}</p> : null}
       {session.recoveryConfirmations || session.kneeConfirmations ? (
@@ -1685,7 +1864,12 @@ function SessionHistoryCard({ session }) {
             <div key={exercise.id} className="rounded-md bg-app-card px-3 py-2 text-sm">
               <div className="flex justify-between gap-2">
                 <span className="font-semibold text-white">{exercise.name}</span>
-                <span className="text-app-muted">{exercise.totalReps}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-app-muted">{exercise.totalReps}</span>
+                  <button onClick={() => onEditExercise?.(session, exercise)} className="rounded border border-app-line px-2 py-1 text-xs font-bold text-app-muted">
+                    수정
+                  </button>
+                </div>
               </div>
               <p className="mt-1 text-app-muted">{setLine}</p>
             </div>

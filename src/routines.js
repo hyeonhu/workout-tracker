@@ -313,6 +313,10 @@ export function createInitialInstanceData() {
   );
 }
 
+export function createInitialDeloadState() {
+  return { mode: "none" };
+}
+
 export function createInitialState() {
   return {
     schemaVersion: 3,
@@ -320,6 +324,7 @@ export function createInitialState() {
     sessionCount: 0,
     profileData: createInitialProfileData(),
     instanceData: createInitialInstanceData(),
+    deload: createInitialDeloadState(),
     recommendationCooldowns: {},
     updatedAt: Date.now(),
   };
@@ -335,6 +340,7 @@ export function migrateState(rawState) {
     schemaVersion: 3,
     profileData: { ...base.profileData, ...(rawState.profileData || {}) },
     instanceData: { ...base.instanceData, ...(rawState.instanceData || {}) },
+    deload: normalizeDeloadState(rawState.deload),
     recommendationCooldowns: { ...base.recommendationCooldowns, ...(rawState.recommendationCooldowns || {}) },
   };
 
@@ -352,7 +358,7 @@ export function migrateState(rawState) {
         targetReps: old.targetReps || buildLegacyTargetReps(old.lastReps, exercise),
         targetTotal: Number(old.targetTotal || exercise.defaultSets * exercise.min),
         stagnationCount: Number(old.stagnationCount || 0),
-        currentSets: Number(old.currentSets || exercise.defaultSets),
+        currentSets: Math.max(exercise.defaultSets, Number(old.currentSets || exercise.defaultSets)),
       };
       migrated.profileData[exercise.profileId] = {
         ...migrated.profileData[exercise.profileId],
@@ -424,11 +430,24 @@ export function migrateState(rawState) {
           ),
       targetTotal: Number(current.targetTotal || exercise.defaultSets * exercise.min),
       stagnationCount: Number(current.stagnationCount || 0),
-      currentSets: Number(current.currentSets || exercise.defaultSets),
+      currentSets: Math.max(exercise.defaultSets, Number(current.currentSets || exercise.defaultSets)),
     };
   }
 
   return migrated;
+}
+
+function normalizeDeloadState(deload) {
+  if (!deload || typeof deload !== "object") return createInitialDeloadState();
+  const mode = ["none", "condition", "plateau_scheduled", "plateau_active"].includes(deload.mode)
+    ? deload.mode
+    : "none";
+  if (mode === "none") return createInitialDeloadState();
+  return {
+    ...deload,
+    mode,
+    remainingSessions: Number(deload.remainingSessions || 0),
+  };
 }
 
 export function profileById(profileId) {

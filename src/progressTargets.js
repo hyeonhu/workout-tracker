@@ -24,6 +24,7 @@ export function lastSuccessfulReps(exercise, view) {
 
 export function nextSuccessReps(exercise, view) {
   const fallback = lowerBoundReps(exercise, view);
+  if (view?.isDeload) return fallback;
   const stored = Array.isArray(view?.targetReps) ? view.targetReps.map((value) => Number(value || 0)) : [];
   const baseline = baselineReps(exercise, view);
   const derived = deriveNextTargetFromBaseline(baseline, fallback, Number(exercise?.max || 0));

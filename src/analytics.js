@@ -13,7 +13,7 @@ export function weeklyMuscleVolume(history, weeks = 10) {
   }));
   const byWeek = Object.fromEntries(rows.map((row) => [row.week, row]));
 
-  for (const session of history) {
+  for (const session of normalSessions(history)) {
     const key = weekKey(toDate(session.date));
     const row = byWeek[key];
     if (!row) continue;
@@ -34,7 +34,7 @@ export function weeklyMuscleVolume(history, weeks = 10) {
 }
 
 export function progressionSeries(history, profileIds = ANCHOR_PROFILE_IDS) {
-  const sorted = [...history].sort((a, b) => toDate(a.date) - toDate(b.date));
+  const sorted = normalSessions(history).sort((a, b) => toDate(a.date) - toDate(b.date));
   return profileIds.map((profileId) => {
     const profile = profileById(profileId);
     const points = [];
@@ -124,7 +124,7 @@ export function weeklyDirectHardSets(history, weeks = 4) {
   }));
   const byWeek = Object.fromEntries(rows.map((row) => [row.week, row]));
 
-  for (const session of history || []) {
+  for (const session of normalSessions(history)) {
     const row = byWeek[weekKey(toDate(session.date))];
     if (!row) continue;
     for (const exercise of session.exercises || []) {
@@ -138,7 +138,7 @@ export function weeklyDirectHardSets(history, weeks = 4) {
 }
 
 export function adherenceRate(history, weeks = 4) {
-  const recent = (history || []).filter((session) => daysAgo(toDate(session.date)) <= weeks * 7);
+  const recent = normalSessions(history).filter((session) => daysAgo(toDate(session.date)) <= weeks * 7);
   const completed = recent.filter((session) => {
     const planned = plannedSetsForSession(session.sessionId, session.routine);
     const logged = (session.exercises || []).reduce((acc, exercise) => {
@@ -210,6 +210,7 @@ export function complianceSeries(history, weeks = 10) {
 }
 
 export function sessionVolume(session) {
+  if (isDeloadSession(session)) return 0;
   return (session.exercises || []).reduce((acc, exercise) => {
     const profile = profileById(normalizeProfileId(exercise)) || {};
     const load = normalizeLoggedLoad(exercise, profile) || (profile.isTime ? 1 : 0);
@@ -276,9 +277,17 @@ function plannedSetsForSession(sessionId, routineName) {
 }
 
 function recentRecoveryFlags(history, weeks) {
-  return (history || [])
+  return normalSessions(history)
     .filter((session) => daysAgo(toDate(session.date)) <= weeks * 7)
     .flatMap((session) => Object.values(session.recoveryConfirmations || session.kneeConfirmations || {}).filter((item) => item && item.clean === false));
+}
+
+function normalSessions(history) {
+  return (history || []).filter((session) => !isDeloadSession(session));
+}
+
+function isDeloadSession(session) {
+  return Boolean(session?.isDeload || session?.deloadType || session?.deload);
 }
 
 function isSuppressed(key, cooldowns) {
