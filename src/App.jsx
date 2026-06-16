@@ -279,7 +279,7 @@ export default function App() {
     const nextEntries = {};
     for (const exercise of routine.exercises) {
       const view = exerciseSessionView(exercise, appState, sessionDeload);
-      const sets = Number(view.currentSets || exercise.defaultSets);
+      const sets = Number(view.currentSets ?? (exercise.optional ? 0 : exercise.defaultSets));
       const suggested = sessionDeload ? deloadTargetReps(exercise) : nextSuccessReps(exercise, view);
       const source = suggested.length ? suggested : view.lastReps?.length ? view.lastReps : Array(sets).fill(exercise.min);
       nextEntries[exercise.id] = Array.from({ length: sets }, (_, index) => Number(source[index] || exercise.min));
@@ -711,6 +711,7 @@ function SessionAccordion({ routine, state, sessionDeload, open, current, onTogg
           <div className="mt-2 flex flex-wrap gap-2 text-xs">
             <Badge>{summary.exerciseCount}종목</Badge>
             <Badge>{summary.totalSets}세트</Badge>
+            {summary.optionalSets ? <Badge>선택 +{summary.optionalSets}세트</Badge> : null}
             {summary.hasKneeSensitive && <Badge amber>무릎 민감 종목 있음</Badge>}
             {summary.hasHamstringSensitive && <Badge rose>햄스트링 민감 종목 있음</Badge>}
           </div>
@@ -765,7 +766,7 @@ function DeloadControlCard({ state, routine, sessionDeload, onConditionDeload, o
     ? "이번 세션만 70% 중량과 하한 반복수로 진행하고, 다음 세션은 정상으로 돌아갑니다."
     : activePlateau
       ? "65% 중량으로 한 사이클을 진행합니다. 정상 중량과 목표는 저장된 상태 그대로 보존됩니다."
-      : "다음 A1부터 4세션 정체 디로드가 시작됩니다. 시작 전에는 예약을 취소할 수 있습니다.";
+      : "다음 Day 1부터 4세션 정체 디로드가 시작됩니다. 시작 전에는 예약을 취소할 수 있습니다.";
 
   return (
     <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
@@ -793,7 +794,7 @@ function exerciseSessionView(exercise, state, sessionDeload) {
     ...view,
     weight: deloadEntryWeight(profileById(exercise.profileId), view, sessionDeload),
     normalWeight: view.weight,
-    currentSets: exercise.defaultSets,
+    currentSets: exercise.optional ? 0 : exercise.defaultSets,
     targetReps,
     targetTotal: sum(targetReps),
     isDeload: true,
@@ -878,30 +879,50 @@ function LogView({
               <span className="text-app-muted">{formatWeight(view.weight, view)}</span>
               <span className="font-bold text-white">총 {sum(reps)} {view.isTime ? "초" : "회"}</span>
             </div>
-            <QuickInputBar
-              exercise={exercise}
-              view={view}
-              reps={reps}
-              setEntries={setEntries}
-            />
-            <div className="mt-3 space-y-2">
-              {reps.map((rep, index) => (
-                <RepInput
-                  key={`${exercise.id}-${index}`}
-                  label={`${index + 1}세트`}
-                  value={rep}
-                  min={exercise.min}
-                  max={exercise.max}
-                  unit={view.isTime ? "초" : "회"}
-                  onChange={(value) =>
-                    setEntries((prev) => ({
-                      ...prev,
-                      [exercise.id]: (prev[exercise.id] || []).map((item, itemIndex) => (itemIndex === index ? value : item)),
-                    }))
-                  }
+            {exercise.optional ? (
+              <button
+                type="button"
+                onClick={() =>
+                  setEntries((prev) => ({
+                    ...prev,
+                    [exercise.id]: reps.length ? [] : Array(exercise.defaultSets).fill(exercise.min),
+                  }))
+                }
+                className={`mt-3 w-full rounded-md border px-3 py-3 text-sm font-bold ${
+                  reps.length ? "border-amber-500/40 bg-amber-500/10 text-amber-100" : "border-app-line bg-app-bg text-app-muted"
+                }`}
+              >
+                {reps.length ? "선택 운동 기록 중 · 누르면 건너뛰기" : "선택 운동 추가"}
+              </button>
+            ) : null}
+            {reps.length > 0 ? (
+              <>
+                <QuickInputBar
+                  exercise={exercise}
+                  view={view}
+                  reps={reps}
+                  setEntries={setEntries}
                 />
-              ))}
-            </div>
+                <div className="mt-3 space-y-2">
+                  {reps.map((rep, index) => (
+                    <RepInput
+                      key={`${exercise.id}-${index}`}
+                      label={`${index + 1}세트`}
+                      value={rep}
+                      min={exercise.min}
+                      max={exercise.max}
+                      unit={view.isTime ? "초" : "회"}
+                      onChange={(value) =>
+                        setEntries((prev) => ({
+                          ...prev,
+                          [exercise.id]: (prev[exercise.id] || []).map((item, itemIndex) => (itemIndex === index ? value : item)),
+                        }))
+                      }
+                    />
+                  ))}
+                </div>
+              </>
+            ) : null}
           </ExerciseLogCard>
           </div>
         );
@@ -1344,7 +1365,7 @@ function SettingsSessionAccordionLegacy({ routine, state, open, onToggle, onProf
             {summary.hasHamstringSensitive && <Badge rose>햄스트링</Badge>}
           </div>
           <p className="mt-1 text-xs text-app-muted">
-            {summary.exerciseCount}종목 · {summary.totalSets}세트
+            {summary.exerciseCount}종목 · {summary.totalSets}세트{summary.optionalSets ? ` · 선택 +${summary.optionalSets}세트` : ""}
           </p>
         </div>
         <ChevronDown className={`h-5 w-5 text-app-muted transition ${open ? "rotate-180" : ""}`} />
@@ -1566,7 +1587,7 @@ function ExerciseCard({ exercise, view, helperText }) {
     <ExerciseLogCard exercise={exercise} view={view}>
       <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
         <Info label="현재" value={view.initialized || view.isTime ? formatWeight(view.weight, view) : "설정 필요"} />
-        <Info label="구성" value={`${view.currentSets || exercise.defaultSets}세트 x ${exercise.min}~${exercise.max}${unit}`} />
+        <Info label="구성" value={`${view.currentSets ?? (exercise.optional ? 0 : exercise.defaultSets)}세트 x ${exercise.min}~${exercise.max}${unit}${exercise.optional ? " · 선택" : ""}`} />
         <Info label="지난 성공" value={formatRepSequence(last)} />
         <Info label="이번 목표" value={`총 ${nextSuccessTotal(exercise, view)}${unit}+ · ${formatRepSequence(next)}`} />
         <Info label="정체" value={`${view.stagnationCount || 0}회`} warn={Number(view.stagnationCount || 0) > 0} />
@@ -1585,8 +1606,8 @@ function ExerciseLogCard({ exercise, view, children }) {
         <div className="min-w-0">
           <h3 className="break-keep text-lg font-bold text-white">{view.name}</h3>
           <p className="mt-1 text-sm text-app-muted">
-            {view.currentSets || exercise.defaultSets}세트 · {exercise.min}~{exercise.max}
-            {view.isTime ? "초" : "회"} {exercise.anchorSession ? "· 앵커" : "· 공유 중량"}
+            {view.currentSets ?? (exercise.optional ? 0 : exercise.defaultSets)}세트 · {exercise.min}~{exercise.max}
+            {view.isTime ? "초" : "회"} {exercise.optional ? "· 선택" : exercise.anchorSession ? "· 앵커" : "· 공유 중량"}
           </p>
         </div>
         <span className="shrink-0 rounded-md px-2 py-1 text-xs font-bold text-white" style={{ backgroundColor: meta.color }}>
@@ -1674,6 +1695,7 @@ function sessionDraftSummary(routine, state, entries) {
     (acc, exercise) => {
       const view = instanceView(exercise, state);
       const reps = entries[exercise.id] || [];
+      if (exercise.optional && reps.length === 0) return acc;
       const total = sum(reps);
       const previous = sum(view.lastReps || []);
       const allAtTop = reps.length > 0 && reps.every((rep) => Number(rep) >= exercise.max);
@@ -1768,7 +1790,7 @@ function SettingsSessionAccordion({ routine, state, open, onToggle, onProfile })
             {summary.hasHamstringSensitive && <Badge rose>햄스트링</Badge>}
           </div>
           <p className="mt-1 text-xs text-app-muted">
-            {summary.exerciseCount}종목 · {summary.totalSets}세트
+            {summary.exerciseCount}종목 · {summary.totalSets}세트{summary.optionalSets ? ` · 선택 +${summary.optionalSets}세트` : ""}
           </p>
         </div>
         <ChevronDown className={`h-5 w-5 text-app-muted transition ${open ? "rotate-180" : ""}`} />
@@ -1881,6 +1903,7 @@ function SessionHistoryCard({ session, onDelete, onEditExercise }) {
 }
 
 function formatWeight(weight, profile) {
+  if (profile?.loadType === "bodyweight" || profile?.entryMode === "reps_only") return "맨몸";
   return formatWeightDisplay(weight, profile, {
     baseWeight: profile.baseWeight,
     includeTotal: profile.displayMode === "per_side_plus_bar" || profile.displayMode === "per_side" || profile.displayMode === "per_hand",

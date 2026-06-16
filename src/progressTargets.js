@@ -1,5 +1,5 @@
 export function lowerBoundReps(exercise, view) {
-  const sets = Number(view?.currentSets || exercise?.defaultSets || 0);
+  const sets = Number(view?.currentSets ?? (exercise?.optional ? 0 : exercise?.defaultSets) ?? 0);
   return Array.from({ length: sets }, () => Number(exercise?.min || 0));
 }
 

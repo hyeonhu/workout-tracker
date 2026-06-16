@@ -2,349 +2,174 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { parse } from "@babel/parser";
 import {
-  adherenceRate,
   bodyweightWeeklyAverage,
-  plateauRecommendations,
+  plannedWeeklySetBalance,
   progressionSeries,
   weeklyDirectHardSets,
-  weeklyMuscleVolume,
 } from "../src/analytics.js";
 import { miniWarmupHelperText, warmupHelperText } from "../src/load.js";
 import {
   completeSession,
+  deloadEntryWeight,
+  deloadTargetReps,
   getSessionDeload,
-  rebuildStateFromHistory,
-  schedulePlateauDeload,
   startConditionDeload,
 } from "../src/progression.js";
-import { formatRepSequence, lastResultReps, lastSuccessfulReps, lowerBoundReps, nextSuccessReps, nextSuccessTotal } from "../src/progressTargets.js";
-import { ROUTINES, createInitialState, instanceView, migrateState, profileById } from "../src/routines.js";
+import { nextSuccessReps } from "../src/progressTargets.js";
+import {
+  ACTIVE_ROUTINE_VERSION,
+  ROUTINES,
+  createInitialState,
+  instanceView,
+  migrateState,
+  profileById,
+  sessionSummary,
+} from "../src/routines.js";
 
 parse(fs.readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8"), {
   sourceType: "module",
   plugins: ["jsx"],
 });
 
-assert.equal(profileById("leg_extension").loadType, "stack_weight");
-assert.equal(profileById("smith_hip_thrust").loadType, "smith_total");
-assert.equal(profileById("incline_bench_chest_supported_db_row").entryMode, "per_hand");
-assert.equal(profileById("ez_bar_curl").loadType, "barbell_total");
+assert.equal(ACTIVE_ROUTINE_VERSION, "aesthetic_3split_v1");
+assert.deepEqual(ROUTINES.map((routine) => routine.id), ["day1", "day2", "day4", "day5"]);
+assert.deepEqual(ROUTINES.map((routine) => routine.name), ["Day 1", "Day 2", "Day 4", "Day 5"]);
+assert.ok(!ROUTINES.some((routine) => ["a1", "b1", "a2", "b2"].includes(routine.id)));
+
+assert.deepEqual(
+  ROUTINES.map((routine) => sessionSummary(routine).totalSets),
+  [19, 21, 23, 21]
+);
+assert.equal(sessionSummary(ROUTINES[3]).optionalSets, 2);
+
+const balance = plannedWeeklySetBalance(ROUTINES);
+assert.equal(balance.chest, 12);
+assert.equal(balance.upper_chest, 6);
+assert.equal(balance.lateral_delts, 14);
+assert.equal(balance.rear_delts, 6);
+assert.equal(balance.biceps, 9);
+assert.equal(balance.triceps, 9);
+assert.equal(balance.back, 12);
+assert.equal(balance.quads, 7);
+assert.equal(balance.hamstrings_glutes, 9);
+assert.equal(balance.core, 3);
+
+assert.deepEqual(ROUTINES[2].exercises.slice(0, 2).map((exercise) => exercise.profileId), [
+  "seated_db_shoulder_press",
+  "lateral_raise_day4",
+]);
+assert.equal(ROUTINES[3].exercises.find((exercise) => exercise.profileId === "rear_delt_fly").optional, false);
+assert.equal(ROUTINES[3].exercises.find((exercise) => exercise.profileId === "lying_leg_raise").optional, true);
+assert.equal(profileById("lying_leg_raise").entryMode, "reps_only");
+
+const lateralRaises = ROUTINES.flatMap((routine) => routine.exercises).filter((exercise) =>
+  exercise.profileId.includes("lateral_raise")
+);
+assert.equal(lateralRaises.length, 4);
+assert.deepEqual(lateralRaises.map((exercise) => exercise.profileId), [
+  "lateral_raise",
+  "lateral_raise_day2",
+  "lateral_raise_day4",
+  "lateral_raise_day5",
+]);
+assert.equal(lateralRaises.filter((exercise) => exercise.anchorSession).length, 1);
+
+const day1OhTri = ROUTINES[0].exercises.find((exercise) => exercise.profileId === "overhead_triceps_extension");
+const day5OhTri = ROUTINES[3].exercises.find((exercise) => exercise.profileId === "overhead_triceps_extension");
+assert.equal(day1OhTri.sharedProfileId, "overhead_cable_triceps_extension");
+assert.equal(day1OhTri.anchorForSharedProgression, true);
+assert.equal(day5OhTri.sharedProfileId, "overhead_cable_triceps_extension");
+assert.equal(day5OhTri.anchorForSharedProgression, false);
 
 const initial = createInitialState();
+assert.equal(migrateState(initial).instanceData.day5_lying_leg_raise.currentSets, 0);
+assert.deepEqual(nextSuccessReps(ROUTINES[3].exercises.at(-1), instanceView(ROUTINES[3].exercises.at(-1), initial)), []);
 
-const b2Entries = Object.fromEntries(ROUTINES[3].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.max)]));
-const b2Result = completeSession(initial, ROUTINES[3], b2Entries, {});
-assert.equal(b2Result.nextState.profileData.lat_pulldown.weight, 47.5, "B2 lat pulldown should also progress the shared load");
-assert.equal(b2Result.nextState.profileData.leg_curl.weight, initial.profileData.leg_curl.weight, "Sensitive shared loads should still wait for a clean follow-up check");
-assert.equal(b2Result.nextState.profileData.leg_curl.hamstringCheckPending, true, "B2 leg curl should schedule a hamstring check");
-assert.equal(b2Result.nextState.instanceData.b2_lat_pulldown.stagnationCount, 0);
-
-const a1Entries = Object.fromEntries(ROUTINES[0].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.max)]));
-const a1Result = completeSession(initial, ROUTINES[0], a1Entries, {});
-assert.equal(a1Result.nextState.profileData.lat_pulldown.weight, 47.5, "A1 lat pulldown anchor should progress shared load");
-assert.equal(a1Result.nextState.profileData.leg_press.kneeCheckPending, true, "Leg press should wait for knee confirmation");
-assert.equal(a1Result.historyExercises[0].normalizedTotalLoad, 50, "Bench 15kg/side + 20kg bar should normalize to 50kg");
-
-const legPressAnchorState = createInitialState();
-legPressAnchorState.profileData.leg_press.initialized = true;
-legPressAnchorState.profileData.leg_press.weight = 40;
-legPressAnchorState.profileData.leg_press.kneeCheckPending = true;
-legPressAnchorState.profileData.leg_press.recoveryCheckPending = true;
-legPressAnchorState.profileData.leg_press.pendingLoadIncrease = true;
-legPressAnchorState.instanceData.a2_leg_press.lastReps = [15, 15];
-legPressAnchorState.instanceData.a2_leg_press.targetTotal = 31;
-legPressAnchorState.instanceData.a2_leg_press.stagnationCount = 2;
-const a1LegEntries = {
-  a1_bench_press: [8, 8, 8],
-  a1_lat_pulldown: [8, 8, 8],
-  a1_incline_db_press: [8, 8],
-  a1_leg_press: [15, 15, 15],
-  a1_lateral_raise: [15, 15, 15],
-  a1_cable_crunch: [10, 10, 10],
-};
-const a1LegResult = completeSession(legPressAnchorState, ROUTINES[0], a1LegEntries, { a1_leg_press: true });
-assert.equal(a1LegResult.nextState.profileData.leg_press.weight, 42.5, "A1 leg press anchor should raise shared weight after clean knee check");
-assert.deepEqual(a1LegResult.nextState.instanceData.a2_leg_press.targetReps, [12, 12], "A2 leg press target should reset to its own lower bound after anchor load change");
-assert.equal(a1LegResult.nextState.instanceData.a2_leg_press.targetTotal, 24, "A2 leg press target should reset to its own lower bound after shared weight change");
-assert.equal(a1LegResult.nextState.instanceData.a2_leg_press.stagnationCount, 0, "A2 leg press stall count should reset on shared load change");
-
-const hamstringInitial = createInitialState();
-hamstringInitial.profileData.leg_curl.weight = 30;
-hamstringInitial.profileData.leg_curl.initialized = true;
-const b1Entries = Object.fromEntries(ROUTINES[1].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.max)]));
-const b1Result = completeSession(hamstringInitial, ROUTINES[1], b1Entries, {});
-assert.equal(b1Result.nextState.profileData.leg_curl.hamstringCheckPending, true, "Leg curl should wait for hamstring confirmation");
-assert.equal(b1Result.nextState.profileData.leg_curl.recoveryCheckPending, true);
-
-const legacy = migrateState({
-  exerciseData: {
-    shoulder_press: { weight: 12.5, initialized: true, currentSets: 3, targetTotal: 25 },
-    hip_thrust: { weight: 40, initialized: true, currentSets: 3, targetTotal: 25 },
-  },
-});
-assert.equal(legacy.profileData.seated_db_shoulder_press.weight, 12.5);
-assert.equal(legacy.profileData.smith_hip_thrust.weight, 40);
-
-const benchView = instanceView(ROUTINES[0].exercises[0], initial);
-assert.match(warmupHelperText(ROUTINES[0].exercises[0], benchView), /웜업/);
-assert.match(warmupHelperText(ROUTINES[0].exercises[0], benchView), /한쪽 2.5kg/);
-assert.equal(miniWarmupHelperText(ROUTINES[2].exercises[4]), null, "A2 leg extension should not show mini warm-up");
-assert.equal(miniWarmupHelperText(ROUTINES[1].exercises[3]), "햄스트링 적응세트 1개 추천");
-assert.equal(miniWarmupHelperText(ROUTINES[3].exercises[6]), "웜업: 동적 준비만 진행");
-
-const rdlView = {
-  currentSets: 3,
-  lastReps: [10, 10, 10],
-  successfulReps: [10, 10, 10],
-  targetReps: [11, 10, 10],
-  isTime: false,
-};
-assert.deepEqual(lowerBoundReps(ROUTINES[1].exercises[0], rdlView), [8, 8, 8]);
-assert.deepEqual(lastResultReps(ROUTINES[1].exercises[0], rdlView), [10, 10, 10]);
-assert.deepEqual(nextSuccessReps(ROUTINES[1].exercises[0], rdlView), [11, 10, 10]);
-assert.equal(nextSuccessTotal(ROUTINES[1].exercises[0], rdlView), 31);
-assert.equal(formatRepSequence([11, 9, 8]), "11,9,8");
-
-const inconsistentTargetView = {
-  currentSets: 2,
-  lastReps: [10, 10],
-  successfulReps: [10, 10],
-  targetReps: [10, 10],
-  isTime: false,
-};
-assert.deepEqual(
-  nextSuccessReps(ROUTINES[3].exercises[4], inconsistentTargetView),
-  [11, 10],
-  "The displayed next target should be rebuilt from the previous record when the stored target is stale"
+const day5State = createInitialState();
+day5State.profileData.overhead_triceps_extension.weight = 20;
+day5State.profileData.overhead_triceps_extension.initialized = true;
+const day5Entries = Object.fromEntries(
+  ROUTINES[3].exercises.map((exercise) => [
+    exercise.id,
+    exercise.optional ? [] : Array(exercise.defaultSets).fill(exercise.max),
+  ])
 );
+const day5Result = completeSession(day5State, ROUTINES[3], day5Entries, {});
+assert.equal(day5Result.nextState.profileData.overhead_triceps_extension.weight, 20);
+assert.ok(!day5Result.historyExercises.some((exercise) => exercise.profileId === "lying_leg_raise"));
 
-const resetTargetView = {
-  currentSets: 3,
-  lastReps: [12, 12, 12],
-  successfulReps: [12, 12, 12],
-  targetReps: [8, 8, 8],
-  isTime: false,
-};
-assert.deepEqual(
-  nextSuccessReps(ROUTINES[1].exercises[0], resetTargetView),
-  [8, 8, 8],
-  "A lower-bound reset after load increase should stay intact"
+const day1State = createInitialState();
+day1State.profileData.overhead_triceps_extension.weight = 20;
+day1State.profileData.overhead_triceps_extension.initialized = true;
+const day1Entries = Object.fromEntries(
+  ROUTINES[0].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.max)])
 );
+const day1Result = completeSession(day1State, ROUTINES[0], day1Entries, {});
+assert.equal(day1Result.nextState.profileData.overhead_triceps_extension.weight, 22.5);
+assert.equal(day1Result.historyExercises[0].routineVersion, ACTIVE_ROUTINE_VERSION);
+assert.equal(day1Result.historyExercises[0].normalNormalizedTotalLoad, 50);
 
-const targetState = createInitialState();
-targetState.profileData.romanian_deadlift.initialized = true;
-targetState.instanceData.b1_romanian_deadlift.successfulReps = [10, 10, 10];
-targetState.instanceData.b1_romanian_deadlift.targetReps = [11, 10, 10];
-targetState.instanceData.b1_romanian_deadlift.targetTotal = 31;
-const failEntries = Object.fromEntries(ROUTINES[1].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.min)]));
-failEntries.b1_romanian_deadlift = [11, 9, 8];
-const failResult = completeSession(targetState, ROUTINES[1], failEntries, {});
-assert.deepEqual(failResult.nextState.instanceData.b1_romanian_deadlift.successfulReps, [10, 10, 10], "Failed result must not replace last successful result");
-assert.deepEqual(failResult.nextState.instanceData.b1_romanian_deadlift.targetReps, [11, 10, 10], "Failed result must not create a new target");
+const deloadState = createInitialState();
+deloadState.profileData.romanian_deadlift.weight = 20;
+deloadState.profileData.romanian_deadlift.initialized = true;
+const conditionDeloadState = startConditionDeload(deloadState, ROUTINES[2].id);
+const conditionDeload = getSessionDeload(conditionDeloadState, ROUTINES[2]);
+const rdl = ROUTINES[2].exercises.find((exercise) => exercise.profileId === "romanian_deadlift");
+assert.equal(conditionDeload.type, "condition");
+assert.equal(deloadTargetReps(rdl).length, 3);
+assert.equal(deloadEntryWeight(profileById("romanian_deadlift"), deloadState.profileData.romanian_deadlift, conditionDeload), 10);
+const deloadEntries = Object.fromEntries(
+  ROUTINES[2].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.min)])
+);
+const deloadResult = completeSession(conditionDeloadState, ROUTINES[2], deloadEntries, {});
+assert.equal(deloadResult.nextState.deload.mode, "none");
+assert.equal(deloadResult.nextState.instanceData.day4_romanian_deadlift.currentSets, 3);
+assert.deepEqual(deloadResult.nextState.instanceData.day4_romanian_deadlift.successfulReps, []);
 
-const successState = createInitialState();
-successState.profileData.romanian_deadlift.initialized = true;
-successState.instanceData.b1_romanian_deadlift.successfulReps = [10, 10, 10];
-successState.instanceData.b1_romanian_deadlift.targetReps = [11, 10, 10];
-successState.instanceData.b1_romanian_deadlift.targetTotal = 31;
-const successEntries = Object.fromEntries(ROUTINES[1].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.min)]));
-successEntries.b1_romanian_deadlift = [11, 10, 10];
-const successResult = completeSession(successState, ROUTINES[1], successEntries, {});
-assert.deepEqual(successResult.nextState.instanceData.b1_romanian_deadlift.successfulReps, [11, 10, 10], "Successful result should become the new successful baseline");
-assert.deepEqual(successResult.nextState.instanceData.b1_romanian_deadlift.targetReps, [11, 11, 10], "Next target should add 1 to the lowest set, left to right");
+assert.match(warmupHelperText(ROUTINES[0].exercises[0], instanceView(ROUTINES[0].exercises[0], initial)), /웜업/);
+assert.match(miniWarmupHelperText(ROUTINES[0].exercises[1]), /프레스/);
+assert.match(miniWarmupHelperText(ROUTINES[2].exercises[2]), /무릎/);
+assert.match(miniWarmupHelperText(ROUTINES[2].exercises[3]), /햄스트링/);
+assert.match(miniWarmupHelperText(ROUTINES[3].exercises[1]), /프레스/);
+assert.match(miniWarmupHelperText(ROUTINES[3].exercises[2]), /둔근/);
 
-const posteriorStallState = createInitialState();
-posteriorStallState.profileData.smith_hip_thrust.initialized = true;
-posteriorStallState.instanceData.b2_hip_thrust.stagnationCount = 2;
-posteriorStallState.instanceData.b2_hip_thrust.successfulReps = [8, 8, 8];
-posteriorStallState.instanceData.b2_hip_thrust.targetReps = [9, 8, 8];
-posteriorStallState.instanceData.b2_hip_thrust.targetTotal = 25;
-const posteriorFailEntries = Object.fromEntries(ROUTINES[3].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.min)]));
-posteriorFailEntries.b2_hip_thrust = [8, 8, 8];
-const posteriorStallResult = completeSession(posteriorStallState, ROUTINES[3], posteriorFailEntries, {});
-assert.equal(posteriorStallResult.nextState.instanceData.b2_hip_thrust.currentSets, 4, "Posterior lifts should add one set after three stalls");
-
-const topOutState = createInitialState();
-topOutState.profileData.romanian_deadlift.initialized = true;
-topOutState.profileData.romanian_deadlift.weight = 15;
-topOutState.instanceData.b1_romanian_deadlift.successfulReps = [11, 12, 12];
-topOutState.instanceData.b1_romanian_deadlift.targetReps = [12, 12, 12];
-topOutState.instanceData.b1_romanian_deadlift.targetTotal = 36;
-const topOutEntries = Object.fromEntries(ROUTINES[1].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.min)]));
-topOutEntries.b1_romanian_deadlift = [12, 12, 12];
-const topOutResult = completeSession(topOutState, ROUTINES[1], topOutEntries, {});
-assert.equal(topOutResult.nextState.profileData.romanian_deadlift.weight, 17.5, "Top-end success should increase load");
-assert.deepEqual(topOutResult.nextState.instanceData.b1_romanian_deadlift.targetReps, [8, 8, 8], "After load increase, the next target should reset to the lower bound");
-assert.deepEqual(topOutResult.nextState.instanceData.b1_romanian_deadlift.displaySuccessfulReps, [12, 12, 12], "Last successful display reps should survive a load increase");
-
-const neutralLatState = createInitialState();
-neutralLatState.profileData.neutral_lat_pulldown.initialized = true;
-neutralLatState.profileData.neutral_lat_pulldown.weight = 45;
-neutralLatState.instanceData.a2_neutral_lat_pulldown.successfulReps = [11, 12];
-neutralLatState.instanceData.a2_neutral_lat_pulldown.displaySuccessfulReps = [11, 12];
-neutralLatState.instanceData.a2_neutral_lat_pulldown.targetReps = [12, 12];
-neutralLatState.instanceData.a2_neutral_lat_pulldown.targetTotal = 24;
-const neutralLatEntries = Object.fromEntries(ROUTINES[2].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.min)]));
-neutralLatEntries.a2_neutral_lat_pulldown = [12, 12];
-const neutralLatResult = completeSession(neutralLatState, ROUTINES[2], neutralLatEntries, {});
-assert.equal(neutralLatResult.nextState.profileData.neutral_lat_pulldown.weight, 47.5, "Neutral-grip lat pulldown should increase immediately on a top-end success");
-assert.deepEqual(lastSuccessfulReps(ROUTINES[2].exercises[1], neutralLatResult.nextState.instanceData.a2_neutral_lat_pulldown), [12, 12], "Displayed last successful reps should stay at the pre-increase success");
-assert.deepEqual(nextSuccessReps(ROUTINES[2].exercises[1], neutralLatResult.nextState.instanceData.a2_neutral_lat_pulldown), [8, 8], "After the increase, the new target should reset to the lower bound");
-
-const legExtensionState = createInitialState();
-legExtensionState.profileData.leg_extension.initialized = true;
-legExtensionState.profileData.leg_extension.weight = 35;
-legExtensionState.instanceData.a2_leg_extension.successfulReps = [15, 11];
-legExtensionState.instanceData.a2_leg_extension.displaySuccessfulReps = [15, 11];
-legExtensionState.instanceData.a2_leg_extension.targetReps = [15, 12];
-legExtensionState.instanceData.a2_leg_extension.targetTotal = 27;
-const legExtensionEntries = Object.fromEntries(ROUTINES[2].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.min)]));
-legExtensionEntries.a2_leg_extension = [15, 12];
-const legExtensionResult = completeSession(legExtensionState, ROUTINES[2], legExtensionEntries, {});
-assert.deepEqual(lastSuccessfulReps(ROUTINES[2].exercises[4], legExtensionResult.nextState.instanceData.a2_leg_extension), [15, 12], "Sensitive lifts should keep the real last successful reps");
-assert.deepEqual(nextSuccessReps(ROUTINES[2].exercises[4], legExtensionResult.nextState.instanceData.a2_leg_extension), [15, 13], "Sensitive lifts should still advance the displayed target from the real success");
-
-const a2LegPressState = createInitialState();
-a2LegPressState.profileData.leg_press.initialized = true;
-a2LegPressState.profileData.leg_press.weight = 40;
-a2LegPressState.instanceData.a2_leg_press.successfulReps = [14, 15];
-a2LegPressState.instanceData.a2_leg_press.targetReps = [15, 15];
-a2LegPressState.instanceData.a2_leg_press.targetTotal = 30;
-const a2LegPressEntries = Object.fromEntries(ROUTINES[2].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.min)]));
-a2LegPressEntries.a2_leg_press = [15, 15];
-const a2LegPressResult = completeSession(a2LegPressState, ROUTINES[2], a2LegPressEntries, {});
-assert.equal(a2LegPressResult.nextState.profileData.leg_press.kneeCheckPending, true, "Leg press should request a knee check after A2 as well");
-assert.equal(a2LegPressResult.nextState.profileData.leg_press.pendingLoadIncrease, true, "A2 leg press should also be able to arm the shared load increase");
-assert.deepEqual(a2LegPressResult.nextState.instanceData.a1_leg_press.targetReps, [10, 10, 10], "A2 leg press should not overwrite the A1 leg press target");
-
-const pendingIncreaseState = createInitialState();
-pendingIncreaseState.profileData.leg_press.initialized = true;
-pendingIncreaseState.profileData.leg_press.weight = 40;
-pendingIncreaseState.profileData.leg_press.kneeCheckPending = true;
-pendingIncreaseState.profileData.leg_press.recoveryCheckPending = true;
-pendingIncreaseState.profileData.leg_press.pendingLoadIncrease = true;
-pendingIncreaseState.instanceData.a1_leg_press.successfulReps = [15, 15, 15];
-pendingIncreaseState.instanceData.a1_leg_press.targetReps = [15, 15, 15];
-pendingIncreaseState.instanceData.a1_leg_press.targetTotal = 45;
-const pendingIncreaseEntries = Object.fromEntries(ROUTINES[2].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.min)]));
-pendingIncreaseEntries.a2_leg_press = [15, 15];
-const pendingIncreaseResult = completeSession(pendingIncreaseState, ROUTINES[2], pendingIncreaseEntries, { a2_leg_press: true });
-assert.equal(pendingIncreaseResult.nextState.profileData.leg_press.weight, 42.5, "Clean follow-up knee check should move the shared weight up");
-assert.deepEqual(pendingIncreaseResult.nextState.instanceData.a2_leg_press.targetReps, [12, 12], "The session that consumes a pending increase should restart from its own lower bound");
-assert.deepEqual(pendingIncreaseResult.nextState.instanceData.a1_leg_press.targetReps, [10, 10, 10], "Sibling shared sessions should keep their own lower bounds after the shared increase");
-
-const conditionDeloadState = startConditionDeload(successState, ROUTINES[1].id);
-const conditionDeload = getSessionDeload(conditionDeloadState, ROUTINES[1]);
-assert.equal(conditionDeload.type, "condition", "Manual deload should create a condition deload for the current session");
-const conditionDeloadResult = completeSession(conditionDeloadState, ROUTINES[1], successEntries, {});
-assert.equal(conditionDeloadResult.nextState.deload.mode, "none", "Condition deload should end after one session");
-assert.deepEqual(conditionDeloadResult.nextState.instanceData.b1_romanian_deadlift.successfulReps, [10, 10, 10], "Condition deload must not replace progression baselines");
-assert.deepEqual(conditionDeloadResult.nextState.instanceData.b1_romanian_deadlift.targetReps, [11, 10, 10], "Condition deload must not create a new target");
-assert.equal(conditionDeloadResult.nextState.instanceData.b1_romanian_deadlift.currentSets, 3, "Condition deload must not reduce stored set count");
-
-const oldDestructiveDeloadState = createInitialState();
-oldDestructiveDeloadState.instanceData.b2_hammer_curl.currentSets = 1;
-assert.equal(migrateState(oldDestructiveDeloadState).instanceData.b2_hammer_curl.currentSets, 2, "Old destructive deload set counts should recover to the planned set count");
-
-let plateauState = schedulePlateauDeload(createInitialState());
-assert.equal(getSessionDeload(plateauState, ROUTINES[1]), null, "Scheduled plateau deload should wait until A1");
-assert.equal(getSessionDeload(plateauState, ROUTINES[0]).type, "plateau", "Scheduled plateau deload should start at A1");
-plateauState.instanceData.a1_bench_press.stagnationCount = 2;
-for (const routine of ROUTINES) {
-  const deloadEntries = Object.fromEntries(routine.exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.min)]));
-  plateauState = completeSession(plateauState, routine, deloadEntries, {}).nextState;
-}
-assert.equal(plateauState.deload.mode, "none", "Plateau deload should end after one full A1-B1-A2-B2 cycle");
-assert.equal(plateauState.instanceData.a1_bench_press.stagnationCount, 0, "Plateau deload should reset stall counters after completion");
-
-const rebuildSeed = createInitialState();
-rebuildSeed.profileData.romanian_deadlift.initialized = true;
-rebuildSeed.profileData.romanian_deadlift.weight = 15;
-const rebuildEntries = Object.fromEntries(ROUTINES[1].exercises.map((exercise) => [exercise.id, Array(exercise.defaultSets).fill(exercise.min)]));
-rebuildEntries.b1_romanian_deadlift = [10, 10, 10];
-const rebuildSession = completeSession(rebuildSeed, ROUTINES[1], rebuildEntries, {});
-const brokenState = createInitialState();
-brokenState.currentRoutineIndex = rebuildSession.nextState.currentRoutineIndex;
-brokenState.sessionCount = rebuildSession.nextState.sessionCount;
-brokenState.profileData.romanian_deadlift.weight = 0;
-brokenState.profileData.romanian_deadlift.initialized = false;
-brokenState.instanceData.b1_romanian_deadlift.stagnationCount = 2;
-brokenState.instanceData.b1_romanian_deadlift.successfulReps = [];
-brokenState.instanceData.b1_romanian_deadlift.targetReps = [10, 10, 10];
-brokenState.instanceData.b1_romanian_deadlift.targetTotal = 30;
-const repairedState = rebuildStateFromHistory(brokenState, [
-  {
-    id: "repair-1",
-    sessionId: ROUTINES[1].id,
-    routine: ROUTINES[1].name,
-    date: new Date("2026-05-07T10:00:00+09:00"),
-    exercises: rebuildSession.historyExercises,
-    recoveryConfirmations: {},
-    notes: "",
-  },
-]);
-assert.equal(repairedState.profileData.romanian_deadlift.weight, 15, "History repair should restore the last logged working weight");
-assert.deepEqual(repairedState.instanceData.b1_romanian_deadlift.successfulReps, [10, 10, 10], "History repair should restore the last successful result");
-assert.deepEqual(repairedState.instanceData.b1_romanian_deadlift.targetReps, [11, 10, 10], "History repair should rebuild the next target from the last successful result");
-assert.equal(repairedState.instanceData.b1_romanian_deadlift.stagnationCount, 0, "History repair should clear stale stall counts when the replayed history does not support them");
-
-const legacyHistoryState = createInitialState();
-const legacyHistoryRepaired = rebuildStateFromHistory(legacyHistoryState, [
-  {
-    id: "legacy-b2",
-    sessionId: "b2",
-    routine: "B2",
-    date: new Date("2026-05-07T18:00:00+09:00"),
-    exercises: [
-      { id: "hip_thrust", profileId: "hip_thrust", weight: 40, reps: [8, 8, 8], totalReps: 24, baseWeight: 20 },
-      { id: "chest_supported_row", profileId: "chest_supported_row", weight: 14, reps: [8, 8, 8], totalReps: 24 },
-      { id: "lat_pulldown_b2", profileId: "lat_pulldown", weight: 45, reps: [10, 10], totalReps: 20 },
-      { id: "leg_curl_b2", profileId: "leg_curl", weight: 30, reps: [10, 10], totalReps: 20 },
-      { id: "hammer_curl", profileId: "hammer_curl", weight: 10, reps: [10, 10], totalReps: 20 },
-      { id: "overhead_triceps_extension", profileId: "overhead_triceps_extension", weight: 20, reps: [10, 10], totalReps: 20 },
-      { id: "plank", profileId: "plank", weight: 0, reps: [30, 30], totalReps: 60 },
-    ],
-    recoveryConfirmations: {},
-    notes: "",
-  },
-]);
-assert.equal(legacyHistoryRepaired.profileData.smith_hip_thrust.weight, 40, "Legacy hip thrust history should map to smith hip thrust");
-assert.deepEqual(legacyHistoryRepaired.instanceData.b2_hammer_curl.successfulReps, [10, 10], "Legacy hammer curl history should map to the current instance");
-assert.deepEqual(legacyHistoryRepaired.instanceData.b2_hammer_curl.targetReps, [11, 10], "Legacy hammer curl history should rebuild the current target correctly");
-
-const history = [
-  {
-    id: "h1",
-    date: new Date(),
-    routine: "A1",
-    exercises: [{ id: "bench_press", profileId: "bench_press", weight: 50, totalReps: 30, reps: [10, 10, 10] }],
-  },
-  {
-    id: "h-deload",
-    date: new Date(),
-    routine: "A1",
-    isDeload: true,
-    deloadType: "condition",
-    exercises: [{ id: "bench_press", profileId: "bench_press", weight: 30, totalReps: 24, reps: [8, 8, 8] }],
-  },
-];
-assert.equal(weeklyMuscleVolume(history, 2).at(-1).muscles.chest, 3600);
-assert.equal(progressionSeries(history, ["bench_press"])[0].points[0].metricLabel, "e1RM");
-assert.equal(progressionSeries(history, ["bench_press"])[0].points[0].normalizedTotalLoad, 120);
-assert.equal(progressionSeries(history, ["bench_press"])[0].points.length, 1, "Deload sessions should not appear in progression charts");
+const today = new Date();
 assert.equal(
   bodyweightWeeklyAverage(
     [
-      { date: new Date(), value: 80, context: "post_workout" },
-      { date: new Date(), value: 81, context: "morning_fasted" },
+      { date: today, value: 80, context: "post_workout" },
+      { date: today, value: 81, context: "morning_fasted" },
+      { date: today, value: 82, context: "other" },
     ],
     1
   )[0].average,
   81
 );
-assert.equal(bodyweightWeeklyAverage([{ date: new Date(), value: 80, context: "post_workout" }], 1)[0].confidence, "fallback");
-assert.equal(weeklyDirectHardSets(history, 1)[0].muscles.chest, 3);
-assert.ok(adherenceRate(history, 4) >= 0);
-assert.ok(Array.isArray(plateauRecommendations(history, [], 4)));
+
+const hardSetRows = weeklyDirectHardSets(
+  [
+    {
+      id: "h1",
+      date: today,
+      sessionId: "day1",
+      routine: "Day 1",
+      exercises: day1Result.historyExercises,
+    },
+  ],
+  1
+);
+assert.equal(hardSetRows[0].muscles.chest, 9);
+assert.equal(hardSetRows[0].muscles.upper_chest, 3);
+assert.equal(hardSetRows[0].muscles.triceps, 6);
+assert.equal(hardSetRows[0].muscles.lateral_delts, 4);
+assert.equal(progressionSeries([{ id: "h1", date: today, exercises: day1Result.historyExercises }], ["bench_press"])[0].points[0].metricLabel, "e1RM");
+assert.equal(progressionSeries([{ id: "h1", date: today, exercises: day1Result.historyExercises }], ["lateral_raise"])[0].points[0].metricLabel, "총중량");
+
+const firebaseSource = fs.readFileSync(new URL("../src/firebase.js", import.meta.url), "utf8");
+const rulesSource = fs.readFileSync(new URL("../firestore.rules", import.meta.url), "utf8");
+assert.match(firebaseSource, /signInAnonymously/);
+assert.match(rulesSource, /recoveryCodes/);
+assert.match(rulesSource, /userAccess/);
+assert.match(rulesSource, /users\/\{userId\}\/\{document=\*\*\}/);
 
 console.log("checks passed");

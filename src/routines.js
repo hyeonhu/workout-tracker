@@ -8,8 +8,11 @@ export const CATEGORY_META = {
   isolation: { label: "고립", color: "#10b981" },
 };
 
+export const ACTIVE_ROUTINE_VERSION = "aesthetic_3split_v1";
+
 export const MUSCLE_GROUPS = [
   { id: "chest", label: "가슴", color: "#ef4444" },
+  { id: "upper_chest", label: "윗가슴", color: "#f97316" },
   { id: "back", label: "등", color: "#3b82f6" },
   { id: "lateral_delts", label: "측면 삼각근", color: "#6366f1" },
   { id: "rear_delts", label: "후면 삼각근", color: "#8b5cf6" },
@@ -61,6 +64,30 @@ export const EXERCISE_PROFILES = {
     entryMode: "per_hand",
     displayMode: "per_hand",
     defaultIncrement: 1,
+    defaultWeight: 0,
+    muscleFactors: { lateral_delts: 1 },
+  }),
+  lateral_raise_day2: profile("lateral_raise_day2", "사이드 레터럴 레이즈 (Day 2 케이블)", "isolation", {
+    loadType: "stack_weight",
+    entryMode: "stack",
+    displayMode: "stack",
+    defaultIncrement: 2.5,
+    defaultWeight: 0,
+    muscleFactors: { lateral_delts: 1 },
+  }),
+  lateral_raise_day4: profile("lateral_raise_day4", "사이드 레터럴 레이즈 (Day 4)", "isolation", {
+    loadType: "dumbbell_each_hand",
+    entryMode: "per_hand",
+    displayMode: "per_hand",
+    defaultIncrement: 1,
+    defaultWeight: 0,
+    muscleFactors: { lateral_delts: 1 },
+  }),
+  lateral_raise_day5: profile("lateral_raise_day5", "사이드 레터럴 레이즈 (Day 5 케이블)", "isolation", {
+    loadType: "stack_weight",
+    entryMode: "stack",
+    displayMode: "stack",
+    defaultIncrement: 2.5,
     defaultWeight: 0,
     muscleFactors: { lateral_delts: 1 },
   }),
@@ -202,6 +229,14 @@ export const EXERCISE_PROFILES = {
     defaultWeight: 0,
     muscleFactors: { biceps: 1 },
   }),
+  incline_db_curl: profile("incline_db_curl", "인클라인 덤벨 컬", "isolation", {
+    loadType: "dumbbell_each_hand",
+    entryMode: "per_hand",
+    displayMode: "per_hand",
+    defaultIncrement: 1,
+    defaultWeight: 0,
+    muscleFactors: { biceps: 1 },
+  }),
   overhead_triceps_extension: profile("overhead_triceps_extension", "오버헤드 트라이셉스 익스텐션", "isolation", {
     loadType: "stack_weight",
     entryMode: "stack",
@@ -209,6 +244,30 @@ export const EXERCISE_PROFILES = {
     defaultIncrement: 2.5,
     defaultWeight: 0,
     muscleFactors: { triceps: 1 },
+  }),
+  rear_delt_fly: profile("rear_delt_fly", "리어델트 플라이 / 리버스 펙덱", "isolation", {
+    loadType: "stack_weight",
+    entryMode: "stack",
+    displayMode: "stack",
+    defaultIncrement: 2.5,
+    defaultWeight: 0,
+    muscleFactors: { rear_delts: 1 },
+  }),
+  dumbbell_crunch: profile("dumbbell_crunch", "덤벨 크런치", "isolation", {
+    loadType: "dumbbell_single",
+    entryMode: "total",
+    displayMode: "total",
+    defaultIncrement: 1,
+    defaultWeight: 0,
+    muscleFactors: { core: 1 },
+  }),
+  lying_leg_raise: profile("lying_leg_raise", "라잉 레그레이즈", "isolation", {
+    loadType: "bodyweight",
+    entryMode: "reps_only",
+    displayMode: "bodyweight",
+    defaultIncrement: 0,
+    defaultWeight: 0,
+    muscleFactors: { core: 1 },
   }),
   plank: profile("plank", "플랭크", "isolation", {
     loadType: "bodyweight_progression",
@@ -222,40 +281,67 @@ export const EXERCISE_PROFILES = {
 };
 
 export const ROUTINES = [
-  session("a1", "A1", "월", "벤치 중심 + 쿼드 + 코어", [
-    inst("a1_bench_press", "bench_press", 3, 8, 12, true),
-    inst("a1_lat_pulldown", "lat_pulldown", 3, 8, 12, true),
-    inst("a1_incline_db_press", "incline_db_press", 2, 8, 12, true),
-    inst("a1_leg_press", "leg_press", 3, 10, 15, true),
-    inst("a1_lateral_raise", "lateral_raise", 3, 15, 25, true),
-    inst("a1_cable_crunch", "cable_crunch", 3, 10, 15, true),
+  session("day1", "Day 1", "월", "Push: 가슴 + 삼두 + 측면 어깨", [
+    inst("day1_bench_press", "bench_press", 3, 8, 12, true, { chartTracking: "e1RM" }),
+    inst("day1_incline_db_press", "incline_db_press", 3, 8, 12, true, { chartTracking: "working_weight" }),
+    inst("day1_cable_fly", "cable_fly", 3, 10, 15, false),
+    inst("day1_overhead_triceps_extension", "overhead_triceps_extension", 3, 10, 15, true, {
+      sharedWeight: true,
+      sharedProfileId: "overhead_cable_triceps_extension",
+      sharedAnchorSession: "Day 1",
+      anchorForSharedProgression: true,
+      chartTracking: "working_weight",
+    }),
+    inst("day1_triceps_pushdown", "triceps_pushdown", 3, 10, 15, false),
+    inst("day1_lateral_raise", "lateral_raise", 4, 15, 25, true, {
+      progression: "double_progression_total_reps",
+      chartTracking: "working_weight_total_reps",
+    }),
   ]),
-  session("b1", "B1", "화", "숄더프레스 중심 + 후면사슬 + 팔", [
-    inst("b1_romanian_deadlift", "romanian_deadlift", 3, 8, 12, true),
-    inst("b1_seated_db_shoulder_press", "seated_db_shoulder_press", 3, 8, 12, true),
-    inst("b1_seated_cable_row", "seated_cable_row", 3, 8, 12, true),
-    inst("b1_leg_curl", "leg_curl", 3, 10, 15, true),
-    inst("b1_triceps_pushdown", "triceps_pushdown", 2, 10, 15, true),
-    inst("b1_ez_bar_curl", "ez_bar_curl", 2, 10, 15, true),
-    inst("b1_face_pull", "face_pull", 2, 12, 15, true),
+  session("day2", "Day 2", "화", "Pull: 등 + 이두 + 후면/측면 어깨", [
+    inst("day2_lat_pulldown", "lat_pulldown", 3, 8, 12, true, { chartTracking: "working_weight" }),
+    inst("day2_seated_cable_row", "seated_cable_row", 3, 8, 12, false),
+    inst("day2_incline_bench_db_row", "incline_bench_chest_supported_db_row", 3, 8, 12, false),
+    inst("day2_incline_db_curl", "incline_db_curl", 3, 10, 15, false),
+    inst("day2_hammer_curl", "hammer_curl", 3, 10, 15, false),
+    inst("day2_face_pull", "face_pull", 3, 12, 15, false),
+    inst("day2_lateral_raise", "lateral_raise_day2", 3, 15, 25, false, {
+      progression: "double_progression_total_reps",
+      sharedProfileWith: "none",
+    }),
   ]),
-  session("a2", "A2", "목", "인클라인 중심 + 쿼드 + 코어", [
-    inst("a2_incline_bench_press", "incline_bench_press", 3, 8, 12, true),
-    inst("a2_neutral_lat_pulldown", "neutral_lat_pulldown", 2, 8, 12, true),
-    inst("a2_cable_fly", "cable_fly", 2, 10, 15, true),
-    inst("a2_leg_press", "leg_press", 2, 12, 15, false),
-    inst("a2_leg_extension", "leg_extension", 2, 10, 15, true),
-    inst("a2_lateral_raise", "lateral_raise", 2, 15, 25, false),
-    inst("a2_reverse_crunch", "reverse_crunch", 3, 10, 15, true),
+  session("day4", "Day 4", "목", "Shoulders first + 하체 + 코어", [
+    inst("day4_seated_db_shoulder_press", "seated_db_shoulder_press", 3, 8, 12, true, { chartTracking: "e1RM" }),
+    inst("day4_lateral_raise", "lateral_raise_day4", 4, 15, 25, false, {
+      progression: "double_progression_total_reps",
+      sharedProfileWith: "none",
+    }),
+    inst("day4_leg_press", "leg_press", 4, 10, 15, true, { chartTracking: "working_weight" }),
+    inst("day4_romanian_deadlift", "romanian_deadlift", 3, 8, 12, true, { chartTracking: "e1RM" }),
+    inst("day4_leg_curl", "leg_curl", 3, 10, 15, true, { chartTracking: "working_weight" }),
+    inst("day4_leg_extension", "leg_extension", 3, 10, 15, true),
+    inst("day4_dumbbell_crunch", "dumbbell_crunch", 3, 10, 15, false),
   ]),
-  session("b2", "B2", "금", "등 보강 + 둔근/햄 + 팔", [
-    inst("b2_hip_thrust", "smith_hip_thrust", 3, 8, 12, true),
-    inst("b2_chest_supported_row", "incline_bench_chest_supported_db_row", 3, 8, 12, true),
-    inst("b2_lat_pulldown", "lat_pulldown", 2, 10, 12, false),
-    inst("b2_leg_curl", "leg_curl", 2, 10, 15, false),
-    inst("b2_hammer_curl", "hammer_curl", 2, 10, 15, true),
-    inst("b2_overhead_triceps_extension", "overhead_triceps_extension", 2, 10, 15, true),
-    inst("b2_plank", "plank", 2, 30, 45, true),
+  session("day5", "Day 5", "금", "Accessory: 광배 + 윗가슴 + 둔근 + 팔 + 후면 어깨", [
+    inst("day5_neutral_lat_pulldown", "neutral_lat_pulldown", 3, 8, 12, true, { chartTracking: "working_weight" }),
+    inst("day5_incline_bench_press", "incline_bench_press", 3, 8, 12, false),
+    inst("day5_smith_hip_thrust", "smith_hip_thrust", 3, 8, 12, true, { chartTracking: "working_weight" }),
+    inst("day5_ez_bar_curl", "ez_bar_curl", 3, 10, 15, false),
+    inst("day5_overhead_triceps_extension", "overhead_triceps_extension", 3, 10, 15, false, {
+      sharedWeight: true,
+      sharedProfileId: "overhead_cable_triceps_extension",
+      sharedAnchorSession: "Day 1",
+      anchorForSharedProgression: false,
+    }),
+    inst("day5_lateral_raise", "lateral_raise_day5", 3, 15, 25, false, {
+      progression: "double_progression_total_reps",
+      sharedProfileWith: "none",
+    }),
+    inst("day5_rear_delt_fly", "rear_delt_fly", 3, 15, 25, false, { optional: false }),
+    inst("day5_lying_leg_raise", "lying_leg_raise", 2, 10, 15, false, {
+      optional: true,
+      progression: "reps_progression",
+    }),
   ]),
 ];
 
@@ -266,10 +352,15 @@ export const SESSION_EXERCISES = ROUTINES.flatMap((routine) =>
 export const ANCHOR_PROFILE_IDS = [
   "bench_press",
   "seated_db_shoulder_press",
-  "lat_pulldown",
-  "leg_press",
   "romanian_deadlift",
+  "incline_db_press",
+  "lat_pulldown",
+  "neutral_lat_pulldown",
+  "leg_press",
+  "leg_curl",
   "smith_hip_thrust",
+  "lateral_raise",
+  "overhead_triceps_extension",
 ];
 
 const LEGACY_PROFILE_ALIASES = {
@@ -286,7 +377,7 @@ export function createInitialProfileData() {
         weight: profileItem.defaultWeight,
         baseWeight: profileItem.baseWeight,
         incrementStep: profileItem.defaultIncrement,
-        initialized: profileItem.defaultWeight > 0 || profileItem.isTime,
+        initialized: profileItem.defaultWeight > 0 || profileItem.isTime || profileItem.loadType === "bodyweight",
         kneeCheckPending: false,
         hamstringCheckPending: false,
         recoveryCheckPending: false,
@@ -304,10 +395,10 @@ export function createInitialInstanceData() {
         lastReps: [],
         successfulReps: [],
         displaySuccessfulReps: [],
-        targetReps: Array(exercise.defaultSets).fill(exercise.min),
-        targetTotal: exercise.defaultSets * exercise.min,
+        targetReps: exercise.optional ? [] : Array(exercise.defaultSets).fill(exercise.min),
+        targetTotal: exercise.optional ? 0 : exercise.defaultSets * exercise.min,
         stagnationCount: 0,
-        currentSets: exercise.defaultSets,
+        currentSets: exercise.optional ? 0 : exercise.defaultSets,
       },
     ])
   );
@@ -358,7 +449,7 @@ export function migrateState(rawState) {
         targetReps: old.targetReps || buildLegacyTargetReps(old.lastReps, exercise),
         targetTotal: Number(old.targetTotal || exercise.defaultSets * exercise.min),
         stagnationCount: Number(old.stagnationCount || 0),
-        currentSets: Math.max(exercise.defaultSets, Number(old.currentSets || exercise.defaultSets)),
+        currentSets: normalizedCurrentSets(exercise, old.currentSets),
       };
       migrated.profileData[exercise.profileId] = {
         ...migrated.profileData[exercise.profileId],
@@ -393,7 +484,7 @@ export function migrateState(rawState) {
       incrementStep: Number(
         current.incrementStep ?? base.profileData[profileItem.id].incrementStep ?? profileItem.defaultIncrement ?? 0
       ),
-      initialized: Boolean(current.initialized || base.profileData[profileItem.id].initialized || profileItem.isTime),
+      initialized: Boolean(current.initialized || base.profileData[profileItem.id].initialized || profileItem.isTime || profileItem.loadType === "bodyweight"),
       recoveryCheckPending: Boolean(current.recoveryCheckPending || current.kneeCheckPending || current.hamstringCheckPending),
       kneeCheckPending: Boolean(current.kneeCheckPending),
       hamstringCheckPending: Boolean(current.hamstringCheckPending),
@@ -428,9 +519,9 @@ export function migrateState(rawState) {
             Array.isArray(current.successfulReps) && current.successfulReps.length ? current.successfulReps : current.lastReps,
             exercise
           ),
-      targetTotal: Number(current.targetTotal || exercise.defaultSets * exercise.min),
+      targetTotal: Number(current.targetTotal || (exercise.optional ? 0 : exercise.defaultSets * exercise.min)),
       stagnationCount: Number(current.stagnationCount || 0),
-      currentSets: Math.max(exercise.defaultSets, Number(current.currentSets || exercise.defaultSets)),
+      currentSets: normalizedCurrentSets(exercise, current.currentSets),
     };
   }
 
@@ -476,6 +567,9 @@ export function instanceView(exercise, state) {
 }
 
 function buildLegacyTargetReps(lastReps, exercise) {
+  if (exercise.optional && (!Array.isArray(lastReps) || !lastReps.length)) {
+    return [];
+  }
   if (!Array.isArray(lastReps) || !lastReps.length) {
     return Array(exercise.defaultSets).fill(exercise.min);
   }
@@ -488,11 +582,19 @@ function buildLegacyTargetReps(lastReps, exercise) {
   return reps;
 }
 
+function normalizedCurrentSets(exercise, value) {
+  const fallback = exercise.optional ? 0 : exercise.defaultSets;
+  const current = Number(value ?? fallback);
+  if (exercise.optional) return current > 0 ? Math.max(exercise.defaultSets, current) : 0;
+  return Math.max(exercise.defaultSets, current || exercise.defaultSets);
+}
+
 export function sessionSummary(routine) {
-  const totalSets = routine.exercises.reduce((acc, exercise) => acc + exercise.defaultSets, 0);
+  const totalSets = routine.exercises.reduce((acc, exercise) => acc + (exercise.optional ? 0 : exercise.defaultSets), 0);
+  const optionalSets = routine.exercises.reduce((acc, exercise) => acc + (exercise.optional ? exercise.defaultSets : 0), 0);
   const hasKneeSensitive = routine.exercises.some((exercise) => profileById(exercise.profileId).kneeSensitive);
   const hasHamstringSensitive = routine.exercises.some((exercise) => profileById(exercise.profileId).hamstringSensitive);
-  return { totalSets, hasKneeSensitive, hasHamstringSensitive, exerciseCount: routine.exercises.length };
+  return { totalSets, optionalSets, hasKneeSensitive, hasHamstringSensitive, exerciseCount: routine.exercises.length };
 }
 
 export function defaultIncrementFor(profileItem) {
@@ -532,11 +634,26 @@ function profile(id, name, category, options) {
 }
 
 function session(id, name, day, title, exercises) {
-  return { id, name, day, title, exercises };
+  return { id, name, day, title, routineVersion: ACTIVE_ROUTINE_VERSION, exercises };
 }
 
-function inst(id, profileId, defaultSets, min, max, anchorSession) {
-  return { id, profileId, defaultSets, min, max, anchorSession };
+function inst(id, profileId, defaultSets, min, max, anchorSession, options = {}) {
+  return {
+    id,
+    profileId,
+    defaultSets,
+    min,
+    max,
+    anchorSession,
+    optional: Boolean(options.optional),
+    progression: options.progression || "double_progression",
+    chartTracking: options.chartTracking || null,
+    sharedWeight: Boolean(options.sharedWeight),
+    sharedProfileId: options.sharedProfileId || null,
+    sharedAnchorSession: options.sharedAnchorSession || null,
+    anchorForSharedProgression: options.anchorForSharedProgression ?? Boolean(anchorSession),
+    sharedProfileWith: options.sharedProfileWith || null,
+  };
 }
 
 export function legacyIdFor(exercise) {

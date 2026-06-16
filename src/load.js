@@ -4,6 +4,8 @@ const LOAD_TYPE_TOTAL_FACTORS = {
   stack_weight: 1,
   plate_per_side: 2,
   smith_total: 2,
+  dumbbell_single: 1,
+  bodyweight: 0,
   bodyweight_progression: 0,
 };
 
@@ -19,6 +21,16 @@ const MINI_WARMUP_HINTS = {
   b2_chest_supported_row: "가벼운 덤벨 1세트 ×8 추천",
   b2_leg_curl: "햄스트링 적응세트 1개 추천",
   b2_plank: "웜업: 동적 준비만 진행",
+  day1_incline_db_press: "프레스 패밀리 후속: 가벼운 덤벨 1~2세트",
+  day2_seated_cable_row: "등/당기기 후속: 가벼운 무게 1세트 ×8 추천",
+  day2_incline_bench_db_row: "등/로우 후속: 가벼운 덤벨 1세트 ×8 추천",
+  day4_leg_press: "하체 전환: 무릎 통증 체크 + 가벼운 적응세트 1~2개",
+  day4_romanian_deadlift: "힌지 전환: 햄스트링 당김과 허리 부담 체크 + 가벼운 1세트",
+  day4_leg_curl: "햄스트링 적응세트 1개 추천",
+  day4_leg_extension: "무릎 통증 없는 범위 확인 + 가벼운 1세트",
+  day5_incline_bench_press: "프레스 전환: 가벼운 1~2세트",
+  day5_smith_hip_thrust: "힙힌지 전환: 둔근 수축 확인 + 가벼운 1세트",
+  day5_lying_leg_raise: "웜업: 동적 준비만 진행",
 };
 
 export function normalizeTotalLoad(profile, enteredWeight, baseWeightOverride) {
@@ -35,6 +47,9 @@ export function normalizeTotalLoad(profile, enteredWeight, baseWeightOverride) {
       return roundLoad(entry);
     case "plate_per_side":
       return roundLoad(entry * 2);
+    case "dumbbell_single":
+      return roundLoad(entry);
+    case "bodyweight":
     case "bodyweight_progression":
     default:
       return null;
@@ -45,7 +60,7 @@ export function normalizeLoggedLoad(exercise, profile) {
   if (exercise?.normalizedTotalLoad !== undefined && exercise?.normalizedTotalLoad !== null) {
     return Number(exercise.normalizedTotalLoad || 0);
   }
-  if (profile?.isTime || profile?.loadType === "bodyweight_progression") return null;
+  if (profile?.isTime || profile?.loadType === "bodyweight_progression" || profile?.loadType === "bodyweight") return null;
   return normalizeTotalLoad(profile, exercise?.weight, exercise?.baseWeight);
 }
 
@@ -54,7 +69,7 @@ export function effectiveBaseWeight(profile, baseWeightOverride) {
 }
 
 export function usesNormalizedLoad(profile) {
-  return Boolean(profile) && profile.loadType !== "bodyweight_progression" && !profile.isTime;
+  return Boolean(profile) && !["bodyweight_progression", "bodyweight"].includes(profile.loadType) && !profile.isTime;
 }
 
 export function hasAdjustableBaseWeight(profile) {
@@ -112,14 +127,14 @@ export function metricDisplayLabel(_profileId, useE1rm) {
 }
 
 export function displayMetricWeight(profile, exercise) {
-  if (profile?.isTime || profile?.loadType === "bodyweight_progression") return 0;
+  if (profile?.isTime || profile?.loadType === "bodyweight_progression" || profile?.loadType === "bodyweight") return 0;
   return normalizeLoggedLoad(exercise, profile) || 0;
 }
 
 export function warmupHelperText(_exercise, view) {
   if (!view) return null;
 
-  if (view.loadType === "bodyweight_progression") {
+  if (view.loadType === "bodyweight_progression" || view.loadType === "bodyweight") {
     return ["웜업", "동적 준비만 진행"].join("\n");
   }
 
@@ -160,7 +175,7 @@ export function miniWarmupHelperText(exercise) {
 }
 
 export function warmupHintText(profile) {
-  if (!profile || profile.loadType === "bodyweight_progression" || profile.isTime) return null;
+  if (!profile || profile.loadType === "bodyweight_progression" || profile.loadType === "bodyweight" || profile.isTime) return null;
   return "가벼운 무게 1세트 ×8 추천";
 }
 
@@ -185,6 +200,8 @@ export function convertNormalizedToEntry(profile, normalizedLoad) {
       return roundWarmupEntry(profile, total);
     case "plate_per_side":
       return roundWarmupEntry(profile, total / 2);
+    case "dumbbell_single":
+      return roundWarmupEntry(profile, total);
     default:
       return 0;
   }
@@ -194,6 +211,7 @@ function warmupStep(profile) {
   if (!profile) return 0;
   if (profile.displayMode === "per_hand") return 1;
   if (profile.displayMode === "stack") return 2.5;
+  if (profile.displayMode === "total") return 1;
   return 2.5;
 }
 

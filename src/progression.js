@@ -21,13 +21,18 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
 
   for (const exercise of routine.exercises) {
     const profile = profileById(exercise.profileId);
+    const rawReps = (entries[exercise.id] || []).map((value) => Number(value || 0));
+    if (exercise.optional && rawReps.length === 0) {
+      instanceData[exercise.id] = normalizeInstanceState(instanceData[exercise.id], exercise);
+      continue;
+    }
     const deloadProfileState = isDeloadSession ? profileStateForDeload(state, profile.id, sessionDeload) : null;
     const profileState = {
       ...profileData[profile.id],
       weight: Number(profileData[profile.id]?.weight || 0),
       baseWeight: Number(profileData[profile.id]?.baseWeight ?? profile.baseWeight ?? 0),
       incrementStep: Number(profileData[profile.id]?.incrementStep || profile.defaultIncrement || 0),
-      initialized: Boolean(profileData[profile.id]?.initialized || profile.isTime),
+      initialized: Boolean(profileData[profile.id]?.initialized || profile.isTime || profile.loadType === "bodyweight"),
       kneeCheckPending: Boolean(profileData[profile.id]?.kneeCheckPending),
       hamstringCheckPending: Boolean(profileData[profile.id]?.hamstringCheckPending),
       pendingLoadIncrease: Boolean(profileData[profile.id]?.pendingLoadIncrease),
@@ -66,7 +71,7 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
       profileState.pendingLoadIncrease = false;
     }
 
-    const reps = (entries[exercise.id] || []).map((value) => Number(value || 0));
+    const reps = rawReps;
     const totalReps = sum(reps);
     const lowerBound = lowerBoundArray(exercise, instanceState.currentSets);
     const lastSuccessful = instanceState.successfulReps.length ? instanceState.successfulReps : [];
@@ -76,7 +81,10 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
     const isSuccess = meetsLowerBound && (successfulBaselineTotal === null ? true : totalReps >= successfulBaselineTotal + 1);
     const allAtTop = reps.length > 0 && reps.every((rep) => Number(rep) >= exercise.max);
     const wasExtraSet = instanceState.currentSets > exercise.defaultSets;
-    const canChangeLoad = profileState.initialized && incrementFor(profileState) > 0;
+    const canChangeLoad =
+      profileState.initialized &&
+      incrementFor(profileState) > 0 &&
+      !(exercise.sharedWeight && exercise.anchorForSharedProgression === false);
     const normalizedTotalLoad = normalizeTotalLoad(profile, loggedWeight, loggedBaseWeight);
 
     historyExercises.push({
@@ -109,6 +117,15 @@ export function completeSession(rawState, routine, entries, kneeApprovals, notes
       kneeSensitive: profile.kneeSensitive,
       hamstringSensitive: profile.hamstringSensitive,
       anchorSession: exercise.anchorSession,
+      routineVersion: routine.routineVersion || null,
+      routineDayKey: routine.id,
+      optional: Boolean(exercise.optional),
+      progression: exercise.progression || "double_progression",
+      chartTracking: exercise.chartTracking || null,
+      sharedWeight: Boolean(exercise.sharedWeight),
+      sharedProfileId: exercise.sharedProfileId || null,
+      sharedAnchorSession: exercise.sharedAnchorSession || null,
+      anchorForSharedProgression: exercise.anchorForSharedProgression ?? Boolean(exercise.anchorSession),
     });
 
     if (isDeloadSession) {
@@ -294,7 +311,7 @@ export function schedulePlateauDeload(rawState) {
     deload: {
       mode: "plateau_scheduled",
       type: "plateau",
-      startsAtSession: "a1",
+      startsAtSession: ROUTINES[0]?.id || "day1",
       factor: 0.65,
       scheduledAt: Date.now(),
     },
@@ -324,7 +341,7 @@ export function getSessionDeload(rawState, routine) {
       normalProfileData: deload.normalProfileData || currentProfileSnapshot(state),
     };
   }
-  if (deload.mode === "plateau_scheduled" && routine?.id === (deload.startsAtSession || "a1")) {
+  if (deload.mode === "plateau_scheduled" && routine?.id === (deload.startsAtSession || ROUTINES[0]?.id || "day1")) {
     return {
       ...deload,
       mode: "plateau_active",
@@ -339,11 +356,12 @@ export function getSessionDeload(rawState, routine) {
 }
 
 export function deloadTargetReps(exercise) {
+  if (exercise.optional) return [];
   return lowerBoundArray(exercise, exercise.defaultSets);
 }
 
 export function deloadEntryWeight(profile, profileState, sessionDeload) {
-  if (!sessionDeload || profile?.isTime || profile?.loadType === "bodyweight_progression") return Number(profileState?.weight || 0);
+  if (!sessionDeload || profile?.isTime || profile?.loadType === "bodyweight_progression" || profile?.loadType === "bodyweight") return Number(profileState?.weight || 0);
   const baseWeight = effectiveBaseWeight(profile, profileState?.baseWeight);
   const normalTotal = normalizeTotalLoad(profile, profileState?.weight, baseWeight);
   if (!normalTotal) return Number(profileState?.weight || 0);
@@ -406,6 +424,10 @@ export function rebuildStateFromHistory(rawState, history = []) {
     for (const exercise of routine.exercises) {
       const logged = findLoggedExercise(loggedExercises, exercise);
       if (!logged) {
+        if (exercise.optional) {
+          entries[exercise.id] = [];
+          continue;
+        }
         entries[exercise.id] = Array(exercise.defaultSets).fill(exercise.min);
         continue;
       }
@@ -445,7 +467,7 @@ export function rebuildStateFromHistory(rawState, history = []) {
         mode: "plateau_active",
         type: "plateau",
         factor: 0.65,
-        startsAtSession: "a1",
+        startsAtSession: ROUTINES[0]?.id || "day1",
         remainingSessions: 4 - replayPlateauDeloadCount,
         normalProfileData: currentProfileSnapshot(replayState),
       },
@@ -512,7 +534,7 @@ function finishDeloadSession(state, sessionDeload) {
       mode: "plateau_active",
       type: "plateau",
       factor: 0.65,
-      startsAtSession: "a1",
+        startsAtSession: ROUTINES[0]?.id || "day1",
       remainingSessions,
       normalProfileData: sessionDeload.normalProfileData || currentProfileSnapshot(state),
       startedAt: sessionDeload.startedAt || Date.now(),
@@ -533,7 +555,13 @@ function resetAllStallCounters(state) {
 }
 
 function normalizeInstanceState(rawInstance, exercise) {
-  const currentSets = Math.max(exercise.defaultSets, Number(rawInstance?.currentSets || exercise.defaultSets));
+  const fallbackSets = exercise.optional ? 0 : exercise.defaultSets;
+  const rawSets = Number(rawInstance?.currentSets ?? fallbackSets);
+  const currentSets = exercise.optional
+    ? rawSets > 0
+      ? Math.max(exercise.defaultSets, rawSets)
+      : 0
+    : Math.max(exercise.defaultSets, rawSets || exercise.defaultSets);
   const successfulReps = sanitizeReps(rawInstance?.successfulReps, currentSets);
   const displaySuccessfulReps = sanitizeReps(rawInstance?.displaySuccessfulReps, currentSets);
   const targetReps = sanitizeReps(rawInstance?.targetReps, currentSets);
@@ -560,11 +588,12 @@ function sanitizeReps(values, expectedLength) {
 function defaultTargetReps(exercise, instanceState) {
   if (instanceState?.targetReps?.length) return instanceState.targetReps;
   if (instanceState?.successfulReps?.length) return buildNextTargetFromSuccessful(instanceState.successfulReps, exercise.max);
-  return lowerBoundArray(exercise, instanceState?.currentSets || exercise.defaultSets);
+  return lowerBoundArray(exercise, instanceState?.currentSets ?? (exercise.optional ? 0 : exercise.defaultSets));
 }
 
 function lowerBoundArray(exercise, sets) {
-  return Array.from({ length: Number(sets || exercise.defaultSets || 0) }, () => Number(exercise.min || 0));
+  const fallback = exercise.optional ? 0 : exercise.defaultSets;
+  return Array.from({ length: Number(sets ?? fallback ?? 0) }, () => Number(exercise.min || 0));
 }
 
 function buildNextTargetFromSuccessful(successfulReps, maxRep) {
@@ -583,10 +612,11 @@ function buildNextTargetFromSuccessful(successfulReps, maxRep) {
 }
 
 function resetInstanceProgress(instanceState, exercise) {
-  const targetReps = lowerBoundArray(exercise, exercise.defaultSets);
+  const nextSets = exercise.optional ? 0 : exercise.defaultSets;
+  const targetReps = lowerBoundArray(exercise, nextSets);
   return {
     ...instanceState,
-    currentSets: exercise.defaultSets,
+    currentSets: nextSets,
     lastReps: [],
     successfulReps: [],
     targetReps,
@@ -606,7 +636,8 @@ function roundWeight(value) {
 function resetSiblingInstancesForProfile(profileId, currentExerciseId, instanceData) {
   for (const sessionExercise of SESSION_EXERCISES) {
     if (sessionExercise.profileId !== profileId || sessionExercise.id === currentExerciseId) continue;
-    const targetReps = lowerBoundArray(sessionExercise, sessionExercise.defaultSets);
+    const nextSets = sessionExercise.optional ? 0 : sessionExercise.defaultSets;
+    const targetReps = lowerBoundArray(sessionExercise, nextSets);
     instanceData[sessionExercise.id] = {
       ...(instanceData[sessionExercise.id] || {}),
       lastReps: [],
@@ -614,7 +645,7 @@ function resetSiblingInstancesForProfile(profileId, currentExerciseId, instanceD
       targetReps,
       targetTotal: sum(targetReps),
       stagnationCount: 0,
-      currentSets: sessionExercise.defaultSets,
+      currentSets: nextSets,
     };
   }
 }

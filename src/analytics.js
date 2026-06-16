@@ -109,6 +109,7 @@ export function plannedWeeklySetBalance(routines) {
   const muscles = Object.fromEntries(MUSCLE_GROUPS.map((muscle) => [muscle.id, 0]));
   for (const routine of routines) {
     for (const exercise of routine.exercises) {
+      if (exercise.optional) continue;
       const profile = profileById(exercise.profileId);
       for (const muscleId of directMusclesFor(profile.id)) muscles[muscleId] += exercise.defaultSets;
     }
@@ -235,8 +236,8 @@ export function normalizeProfileId(exercise) {
 export function directMusclesFor(profileId) {
   const map = {
     bench_press: ["chest"],
-    incline_db_press: ["chest"],
-    incline_bench_press: ["chest"],
+    incline_db_press: ["chest", "upper_chest"],
+    incline_bench_press: ["chest", "upper_chest"],
     cable_fly: ["chest"],
     lat_pulldown: ["back"],
     neutral_lat_pulldown: ["back"],
@@ -244,7 +245,11 @@ export function directMusclesFor(profileId) {
     incline_bench_chest_supported_db_row: ["back"],
     chest_supported_row: ["back"],
     lateral_raise: ["lateral_delts"],
+    lateral_raise_day2: ["lateral_delts"],
+    lateral_raise_day4: ["lateral_delts"],
+    lateral_raise_day5: ["lateral_delts"],
     face_pull: ["rear_delts"],
+    rear_delt_fly: ["rear_delts"],
     leg_press: ["quads"],
     leg_extension: ["quads"],
     romanian_deadlift: ["hamstrings_glutes"],
@@ -253,9 +258,12 @@ export function directMusclesFor(profileId) {
     leg_curl: ["hamstrings_glutes"],
     ez_bar_curl: ["biceps"],
     hammer_curl: ["biceps"],
+    incline_db_curl: ["biceps"],
     triceps_pushdown: ["triceps"],
     overhead_triceps_extension: ["triceps"],
     cable_crunch: ["core"],
+    dumbbell_crunch: ["core"],
+    lying_leg_raise: ["core"],
     reverse_crunch: ["core"],
     plank: ["core"],
   };
@@ -264,14 +272,14 @@ export function directMusclesFor(profileId) {
 
 function plannedSetsForSession(sessionId, routineName) {
   const map = {
-    a1: 17,
-    b1: 19,
-    a2: 16,
-    b2: 16,
-    A1: 17,
-    B1: 19,
-    A2: 16,
-    B2: 16,
+    day1: 19,
+    day2: 21,
+    day4: 23,
+    day5: 21,
+    "Day 1": 19,
+    "Day 2": 21,
+    "Day 4": 23,
+    "Day 5": 21,
   };
   return map[sessionId] || map[routineName] || 0;
 }
